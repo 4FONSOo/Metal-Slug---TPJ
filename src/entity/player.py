@@ -1,39 +1,56 @@
+# src/entity/player.py
 import pygame
-from resources import ResourceManager
+from config import SCREEN_WIDTH, SCREEN_HEIGHT
+import resources
 
 class Player(pygame.sprite.Sprite):
-    def __init__(self, pos):
+    def __init__(self, x, y):
         super().__init__()
-        self.images = ResourceManager.load_image('assets/player_spritesheet.png')
-        # implementar animação: dividir a sprite sheet
-        self.rect = self.images.get_rect(topleft=pos)
-        self.vel = pygame.Vector2(0,0)
-        self.speed = 200
-        self.on_ground = False
-        self.shoot_cooldown = 0.2
-        self._time_since_shot = 0
+        
+        self.original_image = resources.get_sprite('player_idle')
+        self.image = pygame.transform.scale(self.original_image, (48, 64))
+        self.rect = self.image.get_rect(midbottom=(x, y))
 
-    def handle_input(self, keys):
-        self.vel.x = 0
-        if keys[pygame.K_LEFT]:
-            self.vel.x = -self.speed
-        if keys[pygame.K_RIGHT]:
-            self.vel.x = self.speed
-        if keys[pygame.K_SPACE] and self.on_ground:
-            self.vel.y = -300
+        self.velocity = pygame.math.Vector2(0, 0)
+        self.speed = 5
+        self.gravity = 0.8
+        self.on_ground = False
+        
+        self.is_moving_right = False
+        self.is_moving_left = False
+
+    def handle_input(self, events):
+        keys = pygame.key.get_pressed()
+        self.is_moving_right = keys[pygame.K_RIGHT]
+        self.is_moving_left = keys[pygame.K_LEFT]
+
+        for event in events:
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_SPACE and self.on_ground:
+                    self.velocity.y = -15 
+                    self.on_ground = False
+
+    def apply_gravity(self):
+        self.velocity.y += self.gravity
+        if self.velocity.y > 10:
+            self.velocity.y = 10
 
     def update(self, dt):
-        keys = pygame.key.get_pressed()
-        self.handle_input(keys)
-        self._time_since_shot += dt
-        # gravidade
-        self.vel.y += 800 * dt
-        self.rect.x += int(self.vel.x * dt)
-        self.rect.y += int(self.vel.y * dt)
+        if self.is_moving_right:
+            self.velocity.x = self.speed
+        elif self.is_moving_left:
+            self.velocity.x = -self.speed
+        else:
+            self.velocity.x = 0
+            
+        self.apply_gravity()
 
-    def try_shoot(self):
-        if self._time_since_shot >= self.shoot_cooldown:
-            self._time_since_shot = 0
-            # retornar um Projectile instanciado pela Factory
-            return True
-        return False
+        self.rect.x += self.velocity.x
+        self.rect.y += self.velocity.y
+        
+        if self.rect.bottom >= SCREEN_HEIGHT - 64: 
+            self.rect.bottom = SCREEN_HEIGHT - 64
+            self.velocity.y = 0
+            self.on_ground = True
+        else:
+            self.on_ground = False

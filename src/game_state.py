@@ -3,6 +3,7 @@ from config import *
 from scene import Scene
 from scenes.menu_scene import MenuScene
 import sys
+import resources
 
 class Game:
     """
@@ -14,6 +15,9 @@ class Game:
         pygame.display.set_caption(TITLE)
         self.clock = pygame.time.Clock()
         self.running = True
+        
+        resources.load_resources()
+        self.screen = pygame.display.set_mode(SCREEN_SIZE)
         
         # O estado atual do jogo, que é uma Scene
         self.current_scene: Scene = None

@@ -3,6 +3,7 @@ import pygame
 from scene import Scene
 from config import WHITE, SCREEN_WIDTH, SCREEN_HEIGHT
 from typing import TYPE_CHECKING
+from scenes.level_scene import LevelScene
 
 if TYPE_CHECKING:
     from game_state import Game
@@ -24,11 +25,8 @@ class MenuScene(Scene):
         for event in events:
             if event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_RETURN:
-                    # **TODO**: Substituir por um LevelScene real
-                    # self.game_context.set_scene(LevelOneScene(self.game_context))
-                    print("Início do jogo (Implemente a LevelScene aqui!)")
-                    # Para testar, pode fechar ou mudar para uma cena vazia:
-                    self.game_context.running = False
+                    # **MUDAR AQUI** para ir para o LevelScene
+                    self.game_context.set_scene(LevelScene(self.game_context)) # <---
 
     def update(self, dt: float):
         # Lógica de animação do menu, se houver
@@ -36,7 +34,7 @@ class MenuScene(Scene):
 
     def draw(self, screen: pygame.Surface):
         # Desenha o título
-        title_surf = self.font.render("METAL SLUG TPJ", True, WHITE)
+        title_surf = self.font.render("CLONE - METAL SLUG (TPJ)", True, WHITE)
         title_rect = title_surf.get_rect(center=(SCREEN_WIDTH // 2, SCREEN_HEIGHT // 3))
         screen.blit(title_surf, title_rect)
 

@@ -1,32 +1,55 @@
+# src/resources.py
 import pygame
-from pathlib import Path
+import os
+from config import PATH_ASSETS # Importa o caminho base para os assets
 
-class ResourceManager:
-    _images = {}
-    _sounds = {}
+# Padrão Sugerido: Module/Singleton (para garantir que os recursos só são carregados uma vez)
 
-    @classmethod
-    def load_image(cls, path, colorkey=None):
-        path = Path(path)
-        key = str(path)
-        if key in cls._images:
-            return cls._images[key]
-        img = pygame.image.load(str(path)).convert_alpha()
-        if colorkey is not None:
-            img.set_colorkey(colorkey)
-        cls._images[key] = img
-        return img
+# Dicionário global para armazenar todas as imagens carregadas
+SPRITES = {}
 
-    @classmethod
-    def get_image(cls, path):
-        return cls._images.get(str(path))
+def load_image(file_name, colorkey=None):
+    """
+    Carrega uma imagem do diretório de assets.
+    """
+    path = os.path.normpath(os.path.join(PATH_ASSETS, file_name))
+    print(f"[DEBUG] Tentando carregar: {path}")  # Mostra o caminho exato no terminal
+    
+    try:
+        image = pygame.image.load(path).convert_alpha()  # convert_alpha para transparência
+    except FileNotFoundError:
+        print(f"[ERRO] Ficheiro não encontrado: {path}")
+        raise
+    except pygame.error as message:
+        print(f"[ERRO Pygame] Não foi possível carregar a imagem: {path}")
+        raise message
+    
+    if colorkey is not None:
+        if colorkey == -1:
+            colorkey = image.get_at((0, 0))  # Define o pixel superior esquerdo como cor-chave
+        image.set_colorkey(colorkey, pygame.RLEACCEL)
+        
+    return image
 
-    @classmethod
-    def load_sound(cls, path):
-        path = Path(path)
-        key = str(path)
-        if key in cls._sounds:
-            return cls._sounds[key]
-        snd = pygame.mixer.Sound(str(path))
-        cls._sounds[key] = snd
-        return snd
+def load_resources():
+    """
+    Função principal para carregar todos os recursos do jogo.
+    TODO: Mudar 'placeholder.png' para os seus ficheiros reais.
+    """
+    global SPRITES
+    
+    SPRITES['player_idle'] = load_image(os.path.join('player', 'player1', 'player_idle.png'))
+    
+    SPRITES['level1_bg'] = load_image(os.path.join('background', 'level1_bg.png'))
+    
+    # Exemplo: Adicionar mais frames de animação do jogador aqui:
+    # SPRITES['player_run_1'] = load_image(os.path.join('player', 'player_run_1.png'))
+    # SPRITES['player_run_2'] = load_image(os.path.join('player', 'player_run_2.png'))
+    
+    print("Recursos carregados com sucesso!")
+
+def get_sprite(name):
+    """
+    Acede a um sprite carregado pelo seu nome.
+    """
+    return SPRITES.get(name)

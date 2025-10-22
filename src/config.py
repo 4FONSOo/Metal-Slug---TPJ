@@ -1,3 +1,4 @@
+import os
 # Ecrã
 SCREEN_WIDTH = 800
 SCREEN_HEIGHT = 600
@@ -10,5 +11,6 @@ BLACK = (0, 0, 0)
 WHITE = (255, 255, 255)
 RED = (255, 0, 0)
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # Caminhos
-PATH_ASSETS = "assets/"
+PATH_ASSETS = os.path.join(BASE_DIR, '..', 'assets')
