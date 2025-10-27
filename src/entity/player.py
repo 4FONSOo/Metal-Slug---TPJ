@@ -1,56 +1,43 @@
-# src/entity/player.py
 import pygame
-from config import SCREEN_WIDTH, SCREEN_HEIGHT
-import resources
+import sprite_sheet
 
-class Player(pygame.sprite.Sprite):
-    def __init__(self, x, y):
-        super().__init__()
-        
-        self.original_image = resources.get_sprite('player_idle')
-        self.image = pygame.transform.scale(self.original_image, (48, 64))
-        self.rect = self.image.get_rect(midbottom=(x, y))
+pygame.init()
 
-        self.velocity = pygame.math.Vector2(0, 0)
-        self.speed = 5
-        self.gravity = 0.8
-        self.on_ground = False
-        
-        self.is_moving_right = False
-        self.is_moving_left = False
+SCREEN_WIDTH = 500
+SCREEN_HEIGHT = 500
 
-    def handle_input(self, events):
-        keys = pygame.key.get_pressed()
-        self.is_moving_right = keys[pygame.K_RIGHT]
-        self.is_moving_left = keys[pygame.K_LEFT]
+screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+pygame.display.set_caption('Metal_Slug')
 
-        for event in events:
-            if event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_SPACE and self.on_ground:
-                    self.velocity.y = -15 
-                    self.on_ground = False
+sprite_sheet_image = pygame.image.load('doux.png').convert_alpha()
+sprite_sheet = sprite_sheet.SpriteSheet(sprite_sheet_image)
 
-    def apply_gravity(self):
-        self.velocity.y += self.gravity
-        if self.velocity.y > 10:
-            self.velocity.y = 10
+BG = (50, 50, 50)
+BLACK = (0, 0, 0)
 
-    def update(self, dt):
-        if self.is_moving_right:
-            self.velocity.x = self.speed
-        elif self.is_moving_left:
-            self.velocity.x = -self.speed
-        else:
-            self.velocity.x = 0
-            
-        self.apply_gravity()
 
-        self.rect.x += self.velocity.x
-        self.rect.y += self.velocity.y
-        
-        if self.rect.bottom >= SCREEN_HEIGHT - 64: 
-            self.rect.bottom = SCREEN_HEIGHT - 64
-            self.velocity.y = 0
-            self.on_ground = True
-        else:
-            self.on_ground = False
+frame_0 = sprite_sheet.get_image(0, 24, 24, 3, BLACK)
+frame_1 = sprite_sheet.get_image(1, 24, 24, 3, BLACK)
+frame_2 = sprite_sheet.get_image(2, 24, 24, 3, BLACK)
+frame_3 = sprite_sheet.get_image(3, 24, 24, 3, BLACK)
+
+run = True
+while run:
+
+	#update background
+	screen.fill(BG)
+
+	#show frame image
+	screen.blit(frame_0, (0, 0))
+	screen.blit(frame_1, (72, 0))
+	screen.blit(frame_2, (150, 0))
+	screen.blit(frame_3, (250, 0))
+
+	#event handler
+	for event in pygame.event.get():
+		if event.type == pygame.QUIT:
+			run = False
+
+	pygame.display.update()
+
+pygame.quit()
