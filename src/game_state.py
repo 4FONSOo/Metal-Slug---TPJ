@@ -4,9 +4,9 @@ import pygame
 import sys
 from config import *
 from resource import load_player
-from Entity.player import Player
-from Scenes.Lvl1 import load_level
-from Scenes.menu import Menu
+from entity.player import Player
+from scenes.Lvl1 import load_level
+from scenes.menu import Menu
 
 
 class Game:

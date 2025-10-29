@@ -1,13 +1,25 @@
 # config.py
 
+import os
 import pygame
+
 
 WIDTH = 800
 HEIGHT = 600
 WINDOW_TITLE = "Metal Slug 2D"
 FPS = 60
 
-ASSETS_DIR = r"C:\Users\userdr\Desktop\Metal_2710\Assets"
+# Caminho base do projeto (onde está este ficheiro)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Caminho dinâmico para Assets
+ASSETS_DIR = os.path.join(BASE_DIR, "..", "Assets")
+ASSETS_DIR = os.path.abspath(ASSETS_DIR)  # converte para caminho absoluto
+
+if not os.path.isdir(ASSETS_DIR):
+    raise FileNotFoundError(f"Pasta de assets não encontrada: {ASSETS_DIR}")
+
+#ASSETS_DIR = r"C:\Users\userdr\Desktop\Metal_2710\Assets"
 BACKGROUND_FILE = "metal_slug_sub.png"
 PLAYER_EXTS = ("png", "jpg", "jpeg")
 
