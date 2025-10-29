@@ -1,16 +1,28 @@
-import os
-# Ecrã
-SCREEN_WIDTH = 800
-SCREEN_HEIGHT = 600
-SCREEN_SIZE = (SCREEN_WIDTH, SCREEN_HEIGHT)
-TITLE = "Metal Slug Mini Game (TPJ)"
+# config.py
+
+import pygame
+
+WIDTH = 800
+HEIGHT = 600
+WINDOW_TITLE = "Metal Slug 2D"
 FPS = 60
 
-# Cores 
-BLACK = (0, 0, 0)
-WHITE = (255, 255, 255)
-RED = (255, 0, 0)
+ASSETS_DIR = r"C:\Users\userdr\Desktop\Metal_2710\Assets"
+BACKGROUND_FILE = "metal_slug_sub.png"
+PLAYER_EXTS = ("png", "jpg", "jpeg")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# Caminhos
-PATH_ASSETS = os.path.join(BASE_DIR, '..', 'assets')
+PLAYER_WIDTH = 125
+PLAYER_HEIGHT = 125
+PLAYER_SPEED = 5
+PLAYER_JUMP_SPEED = -15
+PLAYER_GRAVITY = 1
+
+BACKGROUND_WIDTH_MANUAL = 4527
+BACKGROUND_HEIGHT_MANUAL = 0
+BG_SPEED = 3
+
+PLATFORMS = [
+    pygame.Rect(100, 500, 200, 20),
+    pygame.Rect(400, 400, 200, 20),
+    pygame.Rect(600, 300, 200, 20),
+]

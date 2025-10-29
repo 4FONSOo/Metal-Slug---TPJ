@@ -1,43 +1,69 @@
+# Entity/player.py
+
 import pygame
-import sprite_sheet
 
-pygame.init()
+from config import PLAYER_SPEED, PLAYER_JUMP_SPEED, PLAYER_GRAVITY, HEIGHT, PLATFORMS, BACKGROUND_WIDTH_MANUAL
 
-SCREEN_WIDTH = 500
-SCREEN_HEIGHT = 500
+class Player:
+    def __init__(self, image, x, y):
+        self.image = image
+        self.rect = self.image.get_rect(topleft=(x, y))
+        self.vel_y = 0
+        self.is_jumping = False
+        self.jump_held = False
+        self.drop_timer = 0
 
-screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-pygame.display.set_caption('Metal_Slug')
+    def handle_input(self, keys):
+        move_x = 0
+        if keys[pygame.K_LEFT]:
+            move_x = -PLAYER_SPEED
+        if keys[pygame.K_RIGHT]:
+            move_x = PLAYER_SPEED
 
-sprite_sheet_image = pygame.image.load('doux.png').convert_alpha()
-sprite_sheet = sprite_sheet.SpriteSheet(sprite_sheet_image)
+        jump_pressed = keys[pygame.K_UP]
+        down_pressed = keys[pygame.K_DOWN]
 
-BG = (50, 50, 50)
-BLACK = (0, 0, 0)
+        # Saltar ou descer plataforma
+        if jump_pressed and not self.jump_held and not self.is_jumping:
+            if down_pressed:
+                self.drop_timer = 10
+                self.vel_y = 5
+            else:
+                self.is_jumping = True
+                self.vel_y = PLAYER_JUMP_SPEED
+            self.jump_held = True
 
+        if not jump_pressed:
+            self.jump_held = False
 
-frame_0 = sprite_sheet.get_image(0, 24, 24, 3, BLACK)
-frame_1 = sprite_sheet.get_image(1, 24, 24, 3, BLACK)
-frame_2 = sprite_sheet.get_image(2, 24, 24, 3, BLACK)
-frame_3 = sprite_sheet.get_image(3, 24, 24, 3, BLACK)
+        # Movimento horizontal
+        self.rect.x += move_x
+        self.rect.x = max(0, min(self.rect.x, BACKGROUND_WIDTH_MANUAL - self.rect.width))
 
-run = True
-while run:
+    def apply_gravity(self):
+        self.vel_y += PLAYER_GRAVITY
+        self.rect.y += self.vel_y
 
-	#update background
-	screen.fill(BG)
+        ignore_platform = self.drop_timer > 0
+        if self.drop_timer > 0:
+            self.drop_timer -= 1
 
-	#show frame image
-	screen.blit(frame_0, (0, 0))
-	screen.blit(frame_1, (72, 0))
-	screen.blit(frame_2, (150, 0))
-	screen.blit(frame_3, (250, 0))
+        on_ground = self.check_collisions(ignore_platform)
+        if on_ground:
+            self.is_jumping = False
+            self.vel_y = 0
 
-	#event handler
-	for event in pygame.event.get():
-		if event.type == pygame.QUIT:
-			run = False
+    def check_collisions(self, ignore_platform=False):
+        on_ground = False
+        for plat in PLATFORMS:
+            if ignore_platform:
+                continue
+            if self.rect.colliderect(plat) and self.rect.bottom - self.vel_y <= plat.top:
+                self.rect.bottom = plat.top
+                on_ground = True
 
-	pygame.display.update()
-
-pygame.quit()
+        # chão
+        if self.rect.bottom >= HEIGHT:
+            self.rect.bottom = HEIGHT
+            on_ground = True
+        return on_ground

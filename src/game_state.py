@@ -1,64 +1,76 @@
+# game_state.py
+
 import pygame
-from config import *
-from scene import Scene
-from scenes.menu_scene import MenuScene
 import sys
-import resources
+from config import *
+from resource import load_player
+from Entity.player import Player
+from Scenes.Lvl1 import load_level
+from Scenes.menu import Menu
+
 
 class Game:
-    """
-    Mantém o estado/cena atual.
-    """
     def __init__(self):
         pygame.init()
-        self.screen = pygame.display.set_mode(SCREEN_SIZE)
-        pygame.display.set_caption(TITLE)
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        pygame.display.set_caption(WINDOW_TITLE)
         self.clock = pygame.time.Clock()
-        self.running = True
-        
-        resources.load_resources()
-        self.screen = pygame.display.set_mode(SCREEN_SIZE)
-        
-        # O estado atual do jogo, que é uma Scene
-        self.current_scene: Scene = None
-        
-        # Inicializa com a cena do Menu
-        self.set_scene(MenuScene(self)) 
 
-    def set_scene(self, new_scene: Scene):
-        """Muda o estado/cena atual."""
-        if self.current_scene:
-            self.current_scene.on_exit()
-            
-        self.current_scene = new_scene
-        self.current_scene.on_enter()
+        # Estados
+        self.running = True
+        self.state = "menu"  # menu → playing
+        self.player_choice = "player_2"
+
+        # Carrega o menu
+        self.menu = Menu(self)
+
+    # ---------- GAME ----------
+    def start_game(self):
+        """Inicializa o nível e jogador"""
+        self.state = "playing"
+        self.level = load_level()
+        self.background = self.level["background"]
+        self.bg_width = self.level["bg_width"]
+        self.platforms = self.level["platforms"]
+
+        player_img = load_player(PLAYER_WIDTH, PLAYER_HEIGHT, self.player_choice)
+        self.player = Player(player_img, 15, 0)
+        self.POV = 0
+        self.run_game_loop()
+
+    def run_game_loop(self):
+        """Loop principal do jogo"""
+        while self.state == "playing":
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    sys.exit()
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    self.state = "menu"
+                    return
+
+            keys = pygame.key.get_pressed()
+            self.player.handle_input(keys)
+            self.player.apply_gravity()
+
+            self.POV = self.player.rect.centerx - WIDTH // 2
+            self.POV = max(0, min(self.POV, self.bg_width - WIDTH))
+
+            self.draw_scene()
+            pygame.display.flip()
+            self.clock.tick(FPS)
+
+    def draw_scene(self):
+        self.screen.fill((0, 0, 0))
+        self.screen.blit(self.background, (-self.POV, 0))
+        for plat in self.platforms:
+            pygame.draw.rect(self.screen, (0, 255, 0), plat.move(-self.POV, 0))
+        self.screen.blit(self.player.image, (self.player.rect.x - self.POV, self.player.rect.y))
 
     def run(self):
-        """
-        O Game Loop principal.
-        Padrão: Template Method (A estrutura do loop é fixa)
-        """
+        """Loop principal do programa"""
         while self.running:
-            # 1. Input/Eventos
-            events = pygame.event.get()
-            for event in events:
-                if event.type == pygame.QUIT:
-                    self.running = False
-            
-            if self.current_scene:
-                self.current_scene.handle_input(events)
-
-            # 2. Update/Lógica
-            dt = self.clock.tick(FPS) / 1000.0 # Tempo decorrido (em segundos)
-            if self.current_scene:
-                self.current_scene.update(dt)
-
-            # 3. Draw/Desenho
-            self.screen.fill(BLACK) # Limpa o ecrã
-            if self.current_scene:
-                self.current_scene.draw(self.screen)
-            
-            pygame.display.flip()
-
-        pygame.quit()
-        sys.exit()
+            if self.state == "menu":
+                self.menu.run()
+            elif self.state == "playing":
+                self.run_game_loop()
