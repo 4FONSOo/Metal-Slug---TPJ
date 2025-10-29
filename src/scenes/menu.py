@@ -2,6 +2,7 @@
 
 import pygame
 import sys
+
 from config import WIDTH, HEIGHT, FPS
 
 class Menu:

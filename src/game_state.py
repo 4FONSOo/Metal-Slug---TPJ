@@ -2,6 +2,7 @@
 
 import pygame
 import sys
+
 from config import *
 from resource import load_player
 from entity.player import Player

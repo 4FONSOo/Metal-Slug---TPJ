@@ -19,7 +19,6 @@ ASSETS_DIR = os.path.abspath(ASSETS_DIR)  # converte para caminho absoluto
 if not os.path.isdir(ASSETS_DIR):
     raise FileNotFoundError(f"Pasta de assets não encontrada: {ASSETS_DIR}")
 
-#ASSETS_DIR = r"C:\Users\userdr\Desktop\Metal_2710\Assets"
 BACKGROUND_FILE = "metal_slug_sub.png"
 PLAYER_EXTS = ("png", "jpg", "jpeg")
 
