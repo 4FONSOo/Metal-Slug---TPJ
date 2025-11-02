@@ -8,6 +8,7 @@ from resource import load_player
 from entity.player import Player
 from scenes.Lvl1 import load_level
 from scenes.menu import Menu
+from sound import SoundManager
 
 
 class Game:
@@ -17,6 +18,9 @@ class Game:
         pygame.display.set_caption(WINDOW_TITLE)
         self.clock = pygame.time.Clock()
 
+        # Som
+        self.sound = SoundManager()
+
         # Estados
         self.running = True
         self.state = "menu"  # menu → playing
@@ -24,12 +28,14 @@ class Game:
 
         # Carrega o menu
         self.menu = Menu(self)
+        self.level = None
 
     # ---------- GAME ----------
     def start_game(self):
         """Inicializa o nível e jogador"""
         self.state = "playing"
         self.level = load_level()
+        self.sound.play_music("theme.mp3")   # toca ao iniciar o jogo
         self.background = self.level["background"]
         self.bg_width = self.level["bg_width"]
         self.platforms = self.level["platforms"]
@@ -44,6 +50,7 @@ class Game:
         while self.state == "playing":
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
+                    self.sound.stop_music()
                     pygame.quit()
                     sys.exit()
                 elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:

@@ -27,3 +27,16 @@ def load_player(width, height, base_name="player_2"):
     img = pygame.image.load(path).convert_alpha()
     return pygame.transform.smoothscale(img, (width, height))
 
+def load_sound_path(filename):
+     """
+     Procura um ficheiro de som dentro de Assets/sounds/
+     e devolve o caminho absoluto.
+     """
+     sounds_dir = os.path.join(ASSETS_DIR, "sounds")
+     path = os.path.join(sounds_dir, filename)
+
+     if not os.path.isfile(path):
+         raise FileNotFoundError(f"[resource] Som não encontrado: {path}")
+
+     return os.path.abspath(path)
+
