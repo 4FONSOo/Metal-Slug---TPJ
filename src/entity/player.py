@@ -4,6 +4,8 @@ import pygame
 
 from config import PLAYER_SPEED, PLAYER_JUMP_SPEED, PLAYER_GRAVITY, HEIGHT, PLATFORMS, BACKGROUND_WIDTH_MANUAL
 
+PLAYER_MAX_HP = 100
+
 class Player:
     def __init__(self, image, x, y):
         self.image = image
@@ -12,6 +14,31 @@ class Player:
         self.is_jumping = False
         self.jump_held = False
         self.drop_timer = 0
+        self.hp = PLAYER_MAX_HP
+        self.alive = True
+
+    def take_damage(self, amount):
+        self.hp = max(0, self.hp - amount)
+        if self.hp == 0:
+            self.alive = False
+
+    def draw_health_bar(self, screen, camera_x):
+        bar_width = 60
+        bar_height = 8
+        x = self.rect.centerx - bar_width // 2 - camera_x
+        y = self.rect.top - 15
+        fill = int(bar_width * (self.hp / PLAYER_MAX_HP))
+
+        if self.hp > 60:
+            color = (0, 255, 0)
+        elif self.hp > 30:
+            color = (255, 255, 0)
+        else:
+            color = (255, 0, 0)
+
+        pygame.draw.rect(screen, (60, 60, 60), (x, y, bar_width, bar_height))
+        pygame.draw.rect(screen, color, (x, y, fill, bar_height))
+
 
     def handle_input(self, keys):
         move_x = 0
