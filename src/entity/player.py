@@ -17,6 +17,10 @@ class Player:
         self.hp = PLAYER_MAX_HP
         self.alive = True
 
+        # 🔹 Sistema de vida (HP)
+        self.max_hp = 100
+        self.hp = self.max_hp
+
     def take_damage(self, amount):
         self.hp = max(0, self.hp - amount)
         if self.hp == 0:
