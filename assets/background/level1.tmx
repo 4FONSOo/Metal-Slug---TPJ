@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.10" tiledversion="1.11.2" orientation="orthogonal" renderorder="right-down" width="29" height="7" tilewidth="32" tileheight="32" infinite="0" nextlayerid="4" nextobjectid="14">
+ <tileset firstgid="1" source="../../../../testes/testes_2.tsx"/>
+ <tileset firstgid="204" source="teetet.tsx"/>
+ <layer id="1" name="BackGround" width="29" height="7">
+  <data encoding="csv">
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+</data>
+ </layer>
+ <objectgroup id="2" name="Collision">
+  <object id="4" x="71.3333" y="156" width="69" height="15"/>
+  <object id="5" x="151.333" y="118.667" width="183.333" height="10.6667"/>
+  <object id="6" x="323.667" y="157.333" width="70.3333" height="12.3333"/>
+  <object id="7" x="385.333" y="118" width="147.667" height="10.3333"/>
+  <object id="8" x="-10" y="220" width="943" height="10.33"/>
+ </objectgroup>
+</map>

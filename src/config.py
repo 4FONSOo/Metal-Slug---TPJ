@@ -20,6 +20,7 @@ if not os.path.isdir(ASSETS_DIR):
     raise FileNotFoundError(f"Pasta de assets não encontrada: {ASSETS_DIR}")
 
 BACKGROUND_FILE = "metal_slug_sub.png"
+# LEVEL_FILE = "level1.tmx"
 PLAYER_EXTS = ("png", "jpg", "jpeg")
 
 PLAYER_WIDTH = 125

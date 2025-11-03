@@ -1,5 +1,3 @@
-# game_state.py
-
 import pygame
 import sys
 
@@ -30,9 +28,9 @@ class Game:
         self.menu = Menu(self)
         self.level = None
 
-    # ---------- GAME ----------
+    # ---------- JOGO ----------
     def start_game(self):
-        """Inicializa o nível e jogador"""
+        """CArrega Nível e jogador"""
         self.state = "playing"
         self.level = load_level()
         self.sound.play_music("theme.mp3")   # toca ao iniciar o jogo
@@ -46,7 +44,7 @@ class Game:
         self.run_game_loop()
 
     def run_game_loop(self):
-        """Loop principal do jogo"""
+        """Loop jogo"""
         while self.state == "playing":
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
@@ -76,7 +74,7 @@ class Game:
         self.screen.blit(self.player.image, (self.player.rect.x - self.POV, self.player.rect.y))
 
     def run(self):
-        """Loop principal do programa"""
+        """Loop Main"""
         while self.running:
             if self.state == "menu":
                 self.menu.run()

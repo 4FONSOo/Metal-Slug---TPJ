@@ -2,8 +2,10 @@
 
 import os
 import pygame
+import pytmx
 
 from config import * #ASSETS_DIR, BACKGROUND_FILE, HEIGHT, BACKGROUND_WIDTH_MANUAL, BACKGROUND_HEIGHT_MANUAL
+# BACKGROUND_HEIGHT_MANUAL, LEVEL_FILE
 
 def find_asset(filename):
     """Procura recursivamente dentro de ASSETS_DIR e devolve o caminho completo."""
@@ -28,10 +30,7 @@ def load_player(width, height, base_name="player_2"):
     return pygame.transform.smoothscale(img, (width, height))
 
 def load_sound_path(filename):
-     """
-     Procura um ficheiro de som dentro de Assets/sounds/
-     e devolve o caminho absoluto.
-     """
+     """ Loading de música """
      sounds_dir = os.path.join(ASSETS_DIR, "sounds")
      path = os.path.join(sounds_dir, filename)
 
@@ -39,4 +38,9 @@ def load_sound_path(filename):
          raise FileNotFoundError(f"[resource] Som não encontrado: {path}")
 
      return os.path.abspath(path)
+"""
+def load_tmx() -> pytmx.TiledMap:
+    Carrega o mapa TMX do Tiled com alpha.
+    level_path = find_asset(LEVEL_FILE)
+    return pytmx.load_pygame(level_path, pixelalpha=True)"""
 

@@ -1,5 +1,3 @@
-# Scenes/menu.py
-
 import pygame
 import sys
 
@@ -31,6 +29,7 @@ class Menu:
             self.draw()
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
+                    self.game.sound.stop_music()
                     pygame.quit()
                     sys.exit()
                 elif event.type == pygame.KEYDOWN:
@@ -51,5 +50,6 @@ class Menu:
             self.game.player_choice = "Tarma Roving"
             self.game.start_game()
         elif self.selected == 2:
+            self.game.sound.stop_music()
             pygame.quit()
             sys.exit()
