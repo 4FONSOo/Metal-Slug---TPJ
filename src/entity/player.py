@@ -1,13 +1,11 @@
-# Entity/player.py
-
 import pygame
-
 from config import PLAYER_SPEED, PLAYER_JUMP_SPEED, PLAYER_GRAVITY, HEIGHT, PLATFORMS, BACKGROUND_WIDTH_MANUAL
 
 PLAYER_MAX_HP = 100
 
 class Player:
     def __init__(self, image, x, y):
+        self.original_image = image
         self.image = image
         self.rect = self.image.get_rect(topleft=(x, y))
         self.vel_y = 0
@@ -17,7 +15,10 @@ class Player:
         self.hp = PLAYER_MAX_HP
         self.alive = True
 
-        # 🔹 Sistema de vida (HP)
+        # Direção e flip
+        self.facing = 1  # 1 = direita, -1 = esquerda
+
+        # Sistema de vida
         self.max_hp = 100
         self.hp = self.max_hp
 
@@ -43,18 +44,21 @@ class Player:
         pygame.draw.rect(screen, (60, 60, 60), (x, y, bar_width, bar_height))
         pygame.draw.rect(screen, color, (x, y, fill, bar_height))
 
-
     def handle_input(self, keys):
         move_x = 0
         if keys[pygame.K_LEFT]:
             move_x = -PLAYER_SPEED
+            self.facing = -1
         if keys[pygame.K_RIGHT]:
             move_x = PLAYER_SPEED
+            self.facing = 1
+
+        # 🔹 Atualiza flip horizontal da sprite
+        self.image = pygame.transform.flip(self.original_image, self.facing == -1, False)
 
         jump_pressed = keys[pygame.K_UP]
         down_pressed = keys[pygame.K_DOWN]
 
-        # Saltar ou descer plataforma
         if jump_pressed and not self.jump_held and not self.is_jumping:
             if down_pressed:
                 self.drop_timer = 10

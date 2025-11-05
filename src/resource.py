@@ -1,11 +1,9 @@
-# resources.py
+# src/resources.py
 
 import os
 import pygame
-import pytmx
+from config import *  # ASSETS_DIR, BACKGROUND_FILE, HEIGHT, BACKGROUND_WIDTH_MANUAL, BACKGROUND_HEIGHT_MANUAL
 
-from config import * #ASSETS_DIR, BACKGROUND_FILE, HEIGHT, BACKGROUND_WIDTH_MANUAL, BACKGROUND_HEIGHT_MANUAL
-# BACKGROUND_HEIGHT_MANUAL, LEVEL_FILE
 
 def find_asset(filename):
     """Procura recursivamente dentro de ASSETS_DIR e devolve o caminho completo."""
@@ -13,6 +11,7 @@ def find_asset(filename):
         if filename in files:
             return os.path.join(root, filename)
     raise FileNotFoundError(f"Asset '{filename}' não encontrado em {ASSETS_DIR}")
+
 
 def load_background():
     bg_path = find_asset(BACKGROUND_FILE)
@@ -22,6 +21,7 @@ def load_background():
     background = pygame.transform.scale(background, (bg_width, bg_height))
     return background, bg_width, bg_height
 
+
 def load_player(width, height, base_name="player_2"):
     """Carrega sprite do jogador conforme o nome (procura automaticamente em subpastas)."""
     filename = f"{base_name}.png"
@@ -29,18 +29,26 @@ def load_player(width, height, base_name="player_2"):
     img = pygame.image.load(path).convert_alpha()
     return pygame.transform.smoothscale(img, (width, height))
 
+
+# 🔹 NOVO: função específica para inimigo
+def load_enemy(width=80, height=80, filename="rebel1.png"):
+    """Carrega sprite do inimigo (ex: rebel1.png) a partir de Assets/enemy/"""
+    enemy_dir = os.path.join(ASSETS_DIR, "enemy")
+    path = os.path.join(enemy_dir, filename)
+
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"[resource] Sprite de inimigo não encontrada: {path}")
+
+    img = pygame.image.load(path).convert_alpha()
+    return pygame.transform.smoothscale(img, (width, height))
+
+
 def load_sound_path(filename):
-     """ Loading de música """
-     sounds_dir = os.path.join(ASSETS_DIR, "sounds")
-     path = os.path.join(sounds_dir, filename)
+    """Procura um ficheiro de som dentro de Assets/sounds/ e devolve o caminho absoluto."""
+    sounds_dir = os.path.join(ASSETS_DIR, "sounds")
+    path = os.path.join(sounds_dir, filename)
 
-     if not os.path.isfile(path):
-         raise FileNotFoundError(f"[resource] Som não encontrado: {path}")
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"[resource] Som não encontrado: {path}")
 
-     return os.path.abspath(path)
-"""
-def load_tmx() -> pytmx.TiledMap:
-    Carrega o mapa TMX do Tiled com alpha.
-    level_path = find_asset(LEVEL_FILE)
-    return pytmx.load_pygame(level_path, pixelalpha=True)"""
-
+    return os.path.abspath(path)
