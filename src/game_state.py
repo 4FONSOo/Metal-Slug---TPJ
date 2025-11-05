@@ -26,15 +26,14 @@ class FloatingText:
 
     def interpolate_color(self):
         """Transição suave entre cor inicial e final."""
-        t = 1 - (self.timer / 60)  # 0 → 1
+        t = 1 - (self.timer / 60)
         r = int(self.color_start[0] + (self.color_end[0] - self.color_start[0]) * t)
         g = int(self.color_start[1] + (self.color_end[1] - self.color_start[1]) * t)
         b = int(self.color_start[2] + (self.color_end[2] - self.color_start[2]) * t)
         return (r, g, b)
 
     def update(self):
-        """Faz o texto subir e desaparecer gradualmente."""
-        self.y -= 0.7  # sobe um pouco mais rápido
+        self.y -= 0.7
         self.alpha = max(0, self.alpha - 4)
         self.timer -= 1
 
@@ -52,7 +51,7 @@ class GameState:
     def __init__(self):
         self.score = 0
         self.credits = 5
-        self.time_left = 60
+        self.time_left = 15
         self.timer_event = pygame.USEREVENT + 1
         pygame.time.set_timer(self.timer_event, 1000)
         self.paused = False
@@ -90,7 +89,7 @@ class Game:
 
         self.enemies = []
         self.projectiles = []
-        self.floating_texts = []  # 🔹 lista para textos de pontuação
+        self.floating_texts = []
         self.shoot_pressed = False
 
         # Cheats
@@ -101,9 +100,8 @@ class Game:
             "TIME": {"progress": 0, "active": False, "timer": 0},
         }
 
-
     # ---------- 🔹 Efeito de flash ----------
-    def screen_flash(self, color=(255,255,255), duration=5):
+    def screen_flash(self, color=(255, 255, 255), duration=5):
         flash = pygame.Surface((WIDTH, HEIGHT))
         flash.fill(color)
         flash.set_alpha(100)
@@ -111,7 +109,6 @@ class Game:
             self.screen.blit(flash, (0, 0))
             pygame.display.flip()
             self.clock.tick(FPS)
-
 
     # ---------- Início do jogo ----------
     def start_game(self):
@@ -127,8 +124,9 @@ class Game:
 
         player_img = load_player(PLAYER_WIDTH, PLAYER_HEIGHT, self.player_choice)
         self.player = Player(player_img, 15, 0)
+        self.player.platforms = self.platforms
 
-        # ---------- Criação de inimigos ----------
+        # 🔹 Criação de inimigos
         enemy1 = EnemySoldier(load_enemy(80, 80, "Rebel1.png"), 400, 100)
         enemy1.set_platforms(self.platforms)
         enemy1.min_x, enemy1.max_x = (100, 600)
@@ -150,7 +148,6 @@ class Game:
         self.POV = 0
         self.run_game_loop()
 
-
     # ---------- Cheats ----------
     def handle_cheat_input(self, event):
         if event.type != pygame.KEYDOWN:
@@ -167,13 +164,12 @@ class Game:
                     data["progress"] = 0
                     if code == "GOD":
                         self.god_mode = data["active"]
-                        color = (255,255,0) if self.god_mode else (255,0,0)
+                        color = (255, 255, 0) if self.god_mode else (255, 0, 0)
                         self.screen_flash(color)
                     elif code == "TIME":
                         self.infinite_time = data["active"]
             else:
                 data["progress"] = 1 if key_char == code[0] else 0
-
 
     # ---------- Colisões ----------
     def handle_collisions(self):
@@ -186,7 +182,6 @@ class Game:
                 if proj.alive and enemy.rect.colliderect(proj.rect):
                     enemy.take_damage(proj.damage)
                     proj.alive = False
-                    # 🔹 Se morrer, soma pontos + cria texto
                     if not enemy.alive:
                         pts = getattr(enemy, "score_value", 0)
                         self.game_state.score += pts
@@ -207,7 +202,6 @@ class Game:
         self.enemies = [e for e in self.enemies if e.alive]
         self.projectiles = [p for p in self.projectiles if p.alive]
 
-
     # ---------- Disparo ----------
     def handle_player_shoot(self):
         if not self.player:
@@ -225,7 +219,6 @@ class Game:
             )
             self.projectiles.append(proj)
             self.shoot_pressed = True
-
 
     # ---------- Morte / tempo ----------
     def check_player_death(self):
@@ -249,7 +242,6 @@ class Game:
         pygame.time.wait(3000)
         self.game_state.reset()
         self.state = "menu"
-
 
     # ---------- Loop ----------
     def run_game_loop(self):
@@ -277,8 +269,8 @@ class Game:
             if self.game_state.paused:
                 self.draw_scene()
                 self.draw_hud()
-                pause_text = self.font.render("PAUSADO", True, (255,255,255))
-                self.screen.blit(pause_text, (WIDTH//2-60, HEIGHT//2-20))
+                pause_text = self.font.render("PAUSADO", True, (255, 255, 255))
+                self.screen.blit(pause_text, (WIDTH // 2 - 60, HEIGHT // 2 - 20))
                 pygame.display.flip()
                 self.clock.tick(FPS)
                 continue
@@ -310,25 +302,19 @@ class Game:
             pygame.display.flip()
             self.clock.tick(FPS)
 
-
     # ---------- Desenho ----------
     def draw_scene(self):
-        self.screen.fill((0,0,0))
+        self.screen.fill((0, 0, 0))
         self.screen.blit(self.background, (-self.POV, 0))
-
-        for plat in self.platforms:
-            pygame.draw.rect(self.screen, (0,255,0), plat.move(-self.POV,0))
 
         if self.player:
             self.screen.blit(self.player.image, (self.player.rect.x - self.POV, self.player.rect.y))
-
         for enemy in self.enemies:
             enemy.draw(self.screen, self.POV)
         for proj in self.projectiles:
             proj.draw(self.screen, self.POV)
         for text in self.floating_texts:
             text.draw(self.screen, self.POV)
-
 
     # ---------- HUD ----------
     def draw_hud(self):
@@ -349,9 +335,9 @@ class Game:
             hp_ratio = self.player.hp / self.player.max_hp
             bar_width, bar_height = 200, 20
             x, y = 20, 40
-            bar_color = (0,255,0) if hp_ratio>0.6 else (255,255,0) if hp_ratio>0.3 else (255,0,0)
-            pygame.draw.rect(self.screen, (80,80,80), (x-2,y-2,bar_width+4,bar_height+4))
-            pygame.draw.rect(self.screen, bar_color, (x,y,bar_width*hp_ratio,bar_height))
+            bar_color = (0, 255, 0) if hp_ratio > 0.6 else (255, 255, 0) if hp_ratio > 0.3 else (255, 0, 0)
+            pygame.draw.rect(self.screen, (80, 80, 80), (x - 2, y - 2, bar_width + 4, bar_height + 4))
+            pygame.draw.rect(self.screen, bar_color, (x, y, bar_width * hp_ratio, bar_height))
 
         credits_text = f"Créditos: {self.game_state.credits}"
         draw_text_with_outline(
@@ -362,7 +348,6 @@ class Game:
             HEIGHT - 40,
             (255, 255, 255),
         )
-
 
     # ---------- Loop Main ----------
     def run(self):

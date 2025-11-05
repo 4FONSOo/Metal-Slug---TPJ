@@ -1,0 +1,65 @@
+{
+    "Map/SizeTest": {
+        "height": 4300,
+        "width": 2
+    },
+    "activeFile": "",
+    "expandedProjectPaths": [
+    ],
+    "file.lastUsedOpenFilter": "All Files (*)",
+    "fileStates": {
+        "Background LvL_1.tsx": {
+            "scaleInDock": 0.25,
+            "scaleInEditor": 1
+        },
+        "C:/Users/userdr/Desktop/2/assets/background/level1.tmx": {
+            "scale": 0.3879849137931034,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 465.22427440633254,
+                "y": 112.11776142202473
+            }
+        },
+        "C:/Users/userdr/Desktop/2/assets/background/teetet.tsx": {
+            "scaleInDock": 1
+        },
+        "C:/Users/userdr/Documents/testes/testes_2.tsx": {
+            "scaleInDock": 1
+        },
+        "C:/Users/userdr/testes/testes_2.tsx": {
+            "scaleInDock": 1
+        },
+        "level1.tmx": {
+            "scale": 0.6776939655172414,
+            "selectedLayer": 0,
+            "viewCenter": {
+                "x": 463.33598346318973,
+                "y": 111.40721895372874
+            }
+        },
+        "lvl1.tmx": {
+            "scale": 0.33,
+            "selectedLayer": -1,
+            "viewCenter": {
+                "x": 483.3333333333333,
+                "y": 13.636363636363626
+            }
+        },
+        "teetet.tsx": {
+            "scaleInDock": 1
+        }
+    },
+    "last.imagePath": "C:/Users/userdr/Documents/GitHub/Metal-Slug---TPJ/assets/background",
+    "map.fixedSize": false,
+    "map.lastUsedFormat": "tmx",
+    "openFiles": [
+    ],
+    "project": "MetalBack.tiled-project",
+    "recentFiles": [
+        "C:/Users/userdr/Desktop/2/assets/background/level1.tmx",
+        "lvl1.tmx",
+        "Background LvL_1.tsx",
+        "level1.tmx"
+    ],
+    "tileset.lastUsedFormat": "tsx"
+}

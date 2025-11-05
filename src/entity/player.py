@@ -14,7 +14,8 @@ class Player:
         self.drop_timer = 0
         self.hp = PLAYER_MAX_HP
         self.alive = True
-
+        self.platforms = []
+        
         # Direção e flip
         self.facing = 1  # 1 = direita, -1 = esquerda
 
@@ -90,7 +91,7 @@ class Player:
 
     def check_collisions(self, ignore_platform=False):
         on_ground = False
-        for plat in PLATFORMS:
+        for plat in self.platforms:
             if ignore_platform:
                 continue
             if self.rect.colliderect(plat) and self.rect.bottom - self.vel_y <= plat.top:
