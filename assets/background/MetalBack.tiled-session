@@ -3,8 +3,9 @@
         "height": 4300,
         "width": 2
     },
-    "activeFile": "",
+    "activeFile": "lvl1.tmx",
     "expandedProjectPaths": [
+        "."
     ],
     "file.lastUsedOpenFilter": "All Files (*)",
     "fileStates": {
@@ -38,11 +39,11 @@
             }
         },
         "lvl1.tmx": {
-            "scale": 0.33,
-            "selectedLayer": -1,
+            "scale": 3,
+            "selectedLayer": 0,
             "viewCenter": {
-                "x": 483.3333333333333,
-                "y": 13.636363636363626
+                "x": 427.83333333333326,
+                "y": 108
             }
         },
         "teetet.tsx": {
@@ -53,11 +54,12 @@
     "map.fixedSize": false,
     "map.lastUsedFormat": "tmx",
     "openFiles": [
+        "lvl1.tmx"
     ],
     "project": "MetalBack.tiled-project",
     "recentFiles": [
-        "C:/Users/userdr/Desktop/2/assets/background/level1.tmx",
         "lvl1.tmx",
+        "C:/Users/userdr/Desktop/2/assets/background/level1.tmx",
         "Background LvL_1.tsx",
         "level1.tmx"
     ],

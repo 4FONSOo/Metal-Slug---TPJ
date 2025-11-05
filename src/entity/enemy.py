@@ -1,44 +1,50 @@
 import pygame
 import random
 from config import HEIGHT
+from resource import load_enemy
 from entity.projectile import Projectile
 
-# 🔹 Constantes globais
-ENEMY_SPEED = 2
-ENEMY_JUMP_SPEED = -12
 ENEMY_GRAVITY = 1
 ENEMY_JUMP_INTERVAL = (2000, 5000)
 ENEMY_MAX_HP = 100
 
 
-# ---------- 🔹 Classe base ----------
 class Enemy:
     def __init__(self, image, x, y):
+        # escala suave
+        self.scale = getattr(self, "scale", 1.0)
+        if self.scale != 1.0:
+            w = int(image.get_width() * self.scale)
+            h = int(image.get_height() * self.scale)
+            image = pygame.transform.smoothscale(image, (w, h))
         self.image = image
+
+        # orientação base da sprite (True = olha para a direita / False = esquerda)
+        self.faces_right = getattr(self, "faces_right", True)
+
         self.rect = self.image.get_rect(topleft=(x, y))
         self.vel_y = 0
-        self.direction = random.choice([-1, 1])
+        self.direction = random.choice([-1, 1])  # -1 = esquerda, +1 = direita
         self.platforms = []
         self.last_jump = pygame.time.get_ticks()
         self.jump_delay = random.randint(*ENEMY_JUMP_INTERVAL)
         self.hp = ENEMY_MAX_HP
         self.alive = True
-        self.score_value = 0
-        self.projectiles = []
 
-        # 🔹 Movimento / Patrulha
-        self.min_x = None
-        self.max_x = None
+        self.min_x = x - 100
+        self.max_x = x + 100
+        self.speed = getattr(self, "speed", 2.0)
+        self.damage = getattr(self, "damage", 10)
+        self.points = getattr(self, "points", 100)
+        self.shoot_interval = getattr(self, "shoot_interval", (3000, 6000))
+        self.last_shot = pygame.time.get_ticks()
 
-        # 🔹 Disparo
-        self.shoot_timer = pygame.time.get_ticks()
-        self.shoot_delay = random.randint(2000, 4000)
+    def set_platforms(self, platforms):
+        self.platforms = platforms
 
-    # ---------- Movimento vertical ----------
     def apply_gravity(self):
         self.vel_y += ENEMY_GRAVITY
         self.rect.y += self.vel_y
-
         on_ground = False
         for plat in self.platforms:
             if self.rect.colliderect(plat) and self.rect.bottom - self.vel_y <= plat.top:
@@ -51,155 +57,194 @@ class Enemy:
             on_ground = True
         return on_ground
 
-    # ---------- Movimento horizontal ----------
     def move(self):
-        self.rect.x += self.direction * ENEMY_SPEED
-
-        if self.min_x is not None and self.rect.left <= self.min_x:
-            self.direction = 1
-        elif self.max_x is not None and self.rect.right >= self.max_x:
+        # margem anti-“flip tremido” nos limites
+        margin = 5
+        self.rect.x += self.direction * self.speed
+        if self.direction > 0 and self.rect.right > self.max_x - margin:
             self.direction = -1
+        elif self.direction < 0 and self.rect.left < self.min_x + margin:
+            self.direction = 1
 
-    # ---------- Saltos aleatórios ----------
     def maybe_jump(self):
         now = pygame.time.get_ticks()
         if now - self.last_jump >= self.jump_delay:
-            self.vel_y = ENEMY_JUMP_SPEED
+            patrol_dist = self.max_x - self.min_x
+            jump_height = -10 - int((patrol_dist / 100) * 2)
+            jump_height = max(-18, min(jump_height, -10))
+            self.vel_y = jump_height
             self.last_jump = now
             self.jump_delay = random.randint(*ENEMY_JUMP_INTERVAL)
 
-    # ---------- Dano ----------
     def take_damage(self, amount):
         self.hp = max(0, self.hp - amount)
         if self.hp == 0:
             self.alive = False
 
-    # ---------- Disparo padrão ----------
-    def maybe_shoot(self):
-        now = pygame.time.get_ticks()
-        if now - self.shoot_timer >= self.shoot_delay:
-            self.shoot_timer = now
-            self.shoot_delay = random.randint(2000, 4000)
-            proj = Projectile(
-                self.rect.centerx + (self.direction * 30),
-                self.rect.centery,
-                self.direction,
-                max_range=2000,
-            )
-            self.projectiles.append(proj)
-
-    # ---------- Atualização ----------
     def update(self):
         if not self.alive:
             return
-
         self.move()
         self.maybe_jump()
         self.apply_gravity()
-        self.maybe_shoot()
 
-        # Atualizar projéteis
-        for proj in self.projectiles:
-            proj.update()
-        self.projectiles = [p for p in self.projectiles if p.alive]
+    def _needs_flip(self) -> bool:
+        """
+        Decide o flip com base na orientação base e direção atual:
+        - Se a sprite base olha para a direita:
+            * mover para a esquerda => flip True
+            * mover para a direita => flip False
+        - Se a sprite base olha para a esquerda:
+            * mover para a direita => flip True
+            * mover para a esquerda => flip False
+        """
+        if self.faces_right:
+            return self.direction < 0
+        else:
+            return self.direction > 0
 
-    # ---------- Desenho ----------
     def draw(self, screen, camera_x):
         if not self.alive:
             return
-
-        # 🔹 Corrigido: sprites originais voltadas para a ESQUERDA
-        # Viramos apenas quando o inimigo vai para a DIREITA
-        img = self.image
-        if self.direction > 0:
-            img = pygame.transform.flip(self.image, True, False)
-
+        img = pygame.transform.flip(self.image, self._needs_flip(), False)
         screen.blit(img, (self.rect.x - camera_x, self.rect.y))
         self.draw_health_bar(screen, camera_x)
 
-        # Desenhar projéteis
-        for proj in self.projectiles:
-            proj.draw(screen, camera_x)
-
-    # ---------- Barra de HP ----------
     def draw_health_bar(self, screen, camera_x):
         bar_width = 40
         bar_height = 6
         x = self.rect.centerx - bar_width // 2 - camera_x
         y = self.rect.top - 10
         fill = int(bar_width * (self.hp / ENEMY_MAX_HP))
-
-        if self.hp > 60:
-            color = (0, 255, 0)
-        elif self.hp > 30:
-            color = (255, 255, 0)
-        else:
-            color = (255, 0, 0)
-
+        color = (0, 255, 0) if self.hp > 60 else (255, 255, 0) if self.hp > 30 else (255, 0, 0)
         pygame.draw.rect(screen, (60, 60, 60), (x, y, bar_width, bar_height))
         pygame.draw.rect(screen, color, (x, y, fill, bar_height))
 
-    def set_platforms(self, platforms):
-        self.platforms = platforms
+    def maybe_shoot(self, projectiles, bg_width):
+        pass
 
 
-# ---------- 🔹 Subclasses específicas ----------
+# ---------- Tipos (ajuste de orientação base) ----------
+# Assumindo que os Rebel*.png OLHAM PARA A ESQUERDA por defeito:
 class EnemySoldier(Enemy):
-    def __init__(self, image, x, y):
-        super().__init__(image, x, y)
-        self.score_value = 100
+    faces_right = False
+    scale = 0.95
+    speed = 2.0
+    damage = 10
+    points = 100
+    shoot_interval = (3000, 6000)
+
+    def maybe_shoot(self, projectiles, bg_width):
+        now = pygame.time.get_ticks()
+        if now - self.last_shot >= random.randint(*self.shoot_interval):
+            sx = self.rect.centerx + (self.direction * 30)
+            sy = self.rect.centery
+            p = Projectile(sx, sy, self.direction, 0, max_range=bg_width, color=(255, 50, 50), damage=4)
+            projectiles.append(p)
+            self.last_shot = now
 
 
 class EnemyShooter(Enemy):
-    def __init__(self, image, x, y):
-        super().__init__(image, x, y)
-        self.score_value = 150
-        self.shoot_delay = random.randint(1000, 3000)
+    faces_right = False
+    scale = 1.0
+    speed = 1.8
+    damage = 20
+    points = 150
+    shoot_interval = (2000, 4000)
 
-    def maybe_shoot(self):
+    def maybe_shoot(self, projectiles, bg_width):
         now = pygame.time.get_ticks()
-        if now - self.shoot_timer >= self.shoot_delay:
-            self.shoot_timer = now
-            self.shoot_delay = random.randint(2000, 4000)
-            proj = Projectile(
-                self.rect.centerx + (self.direction * 30),
-                self.rect.centery - 10,
-                self.direction,
-                max_range=2000,
-            )
-            self.projectiles.append(proj)
-
-
-class EnemyFast(Enemy):
-    def __init__(self, image, x, y):
-        super().__init__(image, x, y)
-        self.score_value = 200
-        self.speed_boost = 1.5
-
-    def move(self):
-        self.rect.x += self.direction * ENEMY_SPEED * self.speed_boost
-        if self.min_x is not None and self.rect.left <= self.min_x:
-            self.direction = 1
-        elif self.max_x is not None and self.rect.right >= self.max_x:
-            self.direction = -1
+        if now - self.last_shot >= random.randint(*self.shoot_interval):
+            sx = self.rect.centerx + (self.direction * 40)
+            sy = self.rect.centery
+            p = Projectile(sx, sy, self.direction, 0, max_range=bg_width, color=(255, 50, 50), damage=10)
+            projectiles.append(p)
+            self.last_shot = now
 
 
 class EnemyHeavy(Enemy):
-    def __init__(self, image, x, y):
-        super().__init__(image, x, y)
-        self.score_value = 300
-        self.hp = ENEMY_MAX_HP * 1.5
-        self.shoot_delay = random.randint(3000, 6000)
+    faces_right = False
+    scale = 1.15
+    speed = 1.2
+    damage = 30
+    points = 200
+    shoot_interval = (3000, 5000)
 
-    def maybe_shoot(self):
+    def maybe_shoot(self, projectiles, bg_width):
         now = pygame.time.get_ticks()
-        if now - self.shoot_timer >= self.shoot_delay:
-            self.shoot_timer = now
-            self.shoot_delay = random.randint(3000, 6000)
-            proj = Projectile(
-                self.rect.centerx + (self.direction * 40),
-                self.rect.centery,
-                self.direction,
-                max_range=2000,
-            )
-            self.projectiles.append(proj)
+        if now - self.last_shot >= random.randint(*self.shoot_interval):
+            sx = self.rect.centerx + (self.direction * 50)
+            sy = self.rect.centery
+            p = Projectile(sx, sy, self.direction, 0, max_range=bg_width, color=(255, 50, 50), damage=20)
+            projectiles.append(p)
+            self.last_shot = now
+
+
+class EnemyFast(Enemy):
+    faces_right = False
+    scale = 0.85
+    speed = 3.5
+    damage = 15
+    points = 120
+    shoot_interval = (3500, 6500)
+
+    def maybe_shoot(self, projectiles, bg_width):
+        now = pygame.time.get_ticks()
+        if now - self.last_shot >= random.randint(*self.shoot_interval):
+            sx = self.rect.centerx + (self.direction * 30)
+            sy = self.rect.centery
+            p = Projectile(sx, sy, self.direction, 0, max_range=bg_width, color=(255, 50, 50), damage=2)
+            projectiles.append(p)
+            self.last_shot = now
+
+
+class EnemyManager:
+    def __init__(self, bg_width, platforms):
+        self.bg_width = bg_width
+        self.platforms = platforms
+        self.enemies = []
+        self.total_spawns = 0
+        self.max_spawns = 50
+        self.max_active = 10
+        self.projectiles = []
+
+    def spawn_enemy_random(self):
+        if self.total_spawns >= self.max_spawns or len(self.enemies) >= self.max_active:
+            return
+        p = random.random()
+        if p < 0.15:
+            cls, sprite = EnemyHeavy, "Rebel3.png"
+        elif p < 0.45:
+            cls, sprite = EnemyShooter, "Rebel2.png"
+        else:
+            cls, sprite = random.choice([(EnemySoldier, "Rebel1.png"), (EnemyFast, "Rebel4.png")])
+        x = random.randint(100, self.bg_width - 100)
+        y = random.randint(50, HEIGHT // 2)
+        img = load_enemy(80, 80, sprite)
+        e = cls(img, x, y)
+        e.set_platforms(self.platforms)
+        patrol = random.randint(150, 350)
+        e.min_x = max(0, x - patrol)
+        e.max_x = min(self.bg_width, x + patrol)
+        self.enemies.append(e)
+        self.total_spawns += 1
+
+    def update(self):
+        for e in self.enemies:
+            e.update()
+            e.maybe_shoot(self.projectiles, self.bg_width)
+        self.enemies = [e for e in self.enemies if e.alive]
+        while len(self.enemies) < self.max_active and self.total_spawns < self.max_spawns:
+            self.spawn_enemy_random()
+
+    def draw(self, screen, camera_x):
+        for e in self.enemies:
+            e.draw(screen, camera_x)
+
+    def get_enemies(self):
+        return self.enemies
+
+    def get_projectiles(self):
+        active = [p for p in self.projectiles if p and p.alive]
+        self.projectiles = [p for p in self.projectiles if p and p.alive]
+        return active
