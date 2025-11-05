@@ -276,7 +276,6 @@ class Game:
             (255, 255, 255),
         )
 
-
     # ---------- Loop Main ----------
     def run(self):
         while self.running:
