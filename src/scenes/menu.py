@@ -44,10 +44,10 @@ class Menu:
 
     def handle_selection(self):
         if self.selected == 0:
-            self.game.player_choice = "Marco Rossi"
+            self.game.player_choice = "player1"
             self.game.start_game()
         elif self.selected == 1:
-            self.game.player_choice = "Tarma Roving"
+            self.game.player_choice = "player2"
             self.game.start_game()
         elif self.selected == 2:
             self.game.sound.stop_music()

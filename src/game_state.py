@@ -10,6 +10,7 @@ from scenes.Lvl1 import load_level
 from scenes.menu import Menu
 from sound import SoundManager
 
+print("[DEBUG] main carregado de:", __file__)
 
 def draw_text_with_outline(surface, text, font, x, y, color, outline_color=(0, 0, 0)):
     text_surface = font.render(text, True, color)
@@ -168,6 +169,9 @@ class Game:
         self.state = "menu"
 
     def start_game(self):
+        
+        print(f"[DEBUG MAIN] Iniciando jogo com personagem: {self.player_choice} ({type(self.player_choice)})")
+
         self.state = "playing"
         self.level = load_level()
         self.sound.stop_music()
@@ -177,10 +181,14 @@ class Game:
         self.bg_width = self.level["bg_width"]
         self.platforms = self.level["platforms"]
 
-        player_img = load_player(PLAYER_WIDTH, PLAYER_HEIGHT, self.player_choice)
-        self.player = Player(player_img, 15, 0)
+        self.player = Player(x=15, y=0, character=self.player_choice)
+        print(f"[DEBUG MAIN] Player criado: {self.player} (rect={self.player.rect})")
+
+        
         self.player.platforms = self.platforms
         self.player.set_level_limits(self.bg_width)
+        
+        
         if not hasattr(self.player, "facing"):
             self.player.facing = 1  # garante atributo
 
@@ -306,6 +314,9 @@ class Game:
                 elif keys[pygame.K_RIGHT]:
                     self.player.facing = 1
 
+                dt = self.clock.get_time()
+                self.player.update_animation(dt)
+
                 self.player.apply_gravity()
                 self.handle_player_shoot()
 
@@ -376,4 +387,7 @@ class Game:
 
 
 if __name__ == "__main__":
+    
+    print("[DEBUG MAIN] A iniciar Metal Slug 2D...")
+
     Game().run()
