@@ -1,11 +1,10 @@
-# src/resource.py
-
 import os
 import pygame
 from config import *  # ASSETS_DIR, BACKGROUND_FILE, HEIGHT, BACKGROUND_WIDTH_MANUAL, BACKGROUND_HEIGHT_MANUAL
 
 
-# ---------- 🔍 UTILIDADES ----------
+# Pasta Assets
+
 def find_asset(filename):
     """Procura recursivamente dentro de ASSETS_DIR e devolve o caminho completo."""
     for root, _, files in os.walk(ASSETS_DIR):
@@ -14,7 +13,8 @@ def find_asset(filename):
     raise FileNotFoundError(f"Asset '{filename}' não encontrado em {ASSETS_DIR}")
 
 
-# ---------- 🌄 BACKGROUND ----------
+# Background
+
 def load_background():
     bg_path = find_asset(BACKGROUND_FILE)
     background = pygame.image.load(bg_path).convert_alpha()
@@ -24,37 +24,25 @@ def load_background():
     return background, bg_width, bg_height
 
 
-# ---------- 🧍‍♂️ JOGADOR (clássico) ----------
+# Jogador (Versão original -> TESTES ONLY)
+
 def load_player(width, height, base_name="player_2"):
-    """Carrega sprite do jogador conforme o nome (modo simples)."""
     filename = f"{base_name}.png"
     path = find_asset(filename)
     img = pygame.image.load(path).convert_alpha()
     return pygame.transform.smoothscale(img, (width, height))
 
 
-# ---------- 🧍‍♂️ JOGADOR (modular animado) ----------
+# JOGADOR (Versão animada Afonso -> Final )
+
 def load_player_sprites(width, height, character="player1"):
-    """
-    Carrega sprites do jogador na estrutura:
-        Assets/player/<character>/   # <character> é 'player1' ou 'player2'
 
-    Nomes de ficheiros suportados DENTRO DA PASTA:
-        tronco_<stem>.png
-        idlelegs_<stem>*.png
-        runlegs_<stem>*.png
-
-    onde <stem> pode ser:
-        - mapeado ('marco' para 'player1', 'tarma' para 'player2'), OU
-        - o próprio <character> (fallback), p.ex.: 'tronco_player1.png'
-    """
     import os
 
     base_path = os.path.join(ASSETS_DIR, "player", character)
     if not os.path.isdir(base_path):
         raise FileNotFoundError(f"[Erro] Pasta da personagem não encontrada: {base_path}")
 
-    # Mapa de pasta → stem de ficheiro (ajusta aqui se os teus nomes forem outros)
     folder_to_stem = {
         "player1": "marco",
         "player2": "tarma",
@@ -62,10 +50,8 @@ def load_player_sprites(width, height, character="player1"):
     stems_to_try = []
     if character in folder_to_stem:
         stems_to_try.append(folder_to_stem[character])
-    # fallback se usares player1 no nome dos ficheiros
-    stems_to_try.append(character)
+        stems_to_try.append(character)
 
-    # --- carregar tronco ---
     torso = None
     used_stem = None
     for stem in stems_to_try:
@@ -79,9 +65,8 @@ def load_player_sprites(width, height, character="player1"):
 
     if torso is None:
         exp = " ou ".join([f"'tronco_{s}.png'" for s in stems_to_try])
-        raise FileNotFoundError(f"[Erro] Não encontrei o tronco em {base_path}. Esperava: {exp}")
+        #raise FileNotFoundError(f"[Erro] Onde está o {base_path}. Era isto: {exp}")
 
-    # --- carregar pernas (idle/run) ---
     idle_legs, run_legs = [], []
     for fname in sorted(os.listdir(base_path)):
         if not fname.lower().endswith(".png"):
@@ -97,9 +82,9 @@ def load_player_sprites(width, height, character="player1"):
             run_legs.append(img)
 
     if not idle_legs:
-        raise FileNotFoundError(f"[Erro] Não encontrei sprites idlelegs_{used_stem}* em {base_path}")
+        raise FileNotFoundError(f"[Erro] Onde estão sprites idlelegs_{used_stem}* em {base_path}")
     if not run_legs:
-        raise FileNotFoundError(f"[Erro] Não encontrei sprites runlegs_{used_stem}* em {base_path}")
+        raise FileNotFoundError(f"[Erro] Onde estão sprites runlegs_{used_stem}* em {base_path}")
 
     print(f"[DEBUG Sprites] pasta={character} stem={used_stem} -> idle={len(idle_legs)} run={len(run_legs)}")
 
@@ -111,22 +96,22 @@ def load_player_sprites(width, height, character="player1"):
         "torso_height": height // 2,
     }
 
-# ---------- 👾 INIMIGOS ----------
+# Inimigos
+
 def load_enemy(width=80, height=80, filename="rebel1.png"):
-    """Carrega sprite do inimigo (ex: rebel1.png) a partir de Assets/enemy/"""
     enemy_dir = os.path.join(ASSETS_DIR, "enemy")
     path = os.path.join(enemy_dir, filename)
 
     if not os.path.isfile(path):
-        raise FileNotFoundError(f"[resource] Sprite de inimigo não encontrada: {path}")
+        raise FileNotFoundError(f"[resource] Inimigo onde está: {path}")
 
     img = pygame.image.load(path).convert_alpha()
     return pygame.transform.smoothscale(img, (width, height))
 
 
-# ---------- 🔊 SONS ----------
+# Sons
+
 def load_sound_path(filename):
-    """Procura um ficheiro de som dentro de Assets/sounds/ e devolve o caminho absoluto."""
     sounds_dir = os.path.join(ASSETS_DIR, "sounds")
     path = os.path.join(sounds_dir, filename)
 

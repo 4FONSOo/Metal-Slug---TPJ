@@ -1,4 +1,3 @@
-# src/entity/player.py
 import pygame
 import config
 
@@ -10,66 +9,63 @@ from config import (
     HEIGHT
 )
 
-print(f"[DEBUG] Player.py carregado de: {__file__}")
-
-
 class Player:
     def __init__(self, x, y, character="marco"):
         
-        print(f"[DEBUG Player.__init__] character={character} ({type(character)})")
-
-        # Proteção contra tipo incorreto
+        # Proteção contra tipo erro de ficheiro
         
         if not isinstance(character, str):
-            raise TypeError(f"[Player] Esperava string em 'character', recebeu {character} ({type(character)})")
+            raise TypeError(f"[Player] Waiting for string em 'character', recebeu {character} ({type(character)})")
         
-        # 🔹 Sprites compostas (torso + pernas)
+        # Sprites
+        
         self.sprites = self.load_sprites(character)
         self.image = pygame.Surface((config.PLAYER_WIDTH, config.PLAYER_HEIGHT), pygame.SRCALPHA)
         self.rect = self.image.get_rect(topleft=(x, y))
 
-        # ---------- 🎞️ Animação ----------
+        # Animação 
+        
         self.leg_state = "idle"  # idle ou run
         self.leg_frame = 0
         self.animation_timer = 0
         self.animation_speed = 100  # ms entre frames
 
-        # ---------- ⚙️ Movimento e física ----------
+        # Movimento
+        
         self.vel_y = 0
         self.is_jumping = False
         self.jump_held = False
         self.drop_timer = 0
         self.moving = False
 
-        # ---------- 🧭 Direção ----------
-        self.facing = 1  # 1 = direita, -1 = esquerda
+        # Direção
+        
+        self.facing = 1 
         self.bg_width = 0
 
-        # ---------- ❤️ Vida ----------
+        # HP
+        
         self.max_hp = PLAYER_MAX_HP
         self.hp = self.max_hp
         self.alive = True
 
-        # ---------- 🧱 Plataformas ----------
+        # Plataformas (Não atives neste momento, só para testes)
+        
         self.platforms = []
-
-        # Inicializa sprite composta
+        
         self.update_sprite()
 
-    # ---------- 🎨 SPRITES ----------
+    # Sprites
+
     def load_sprites(self, character):
-        """Carrega sprites compostas do jogador (torso e pernas)."""
+        
         from resource import load_player_sprites
-
-        print(f"[DEBUG Player.load_sprites] a carregar '{character}'...")
-
         return load_player_sprites(config.PLAYER_WIDTH, config.PLAYER_HEIGHT, character)
 
     def update_sprite(self):
-        """Atualiza o sprite composto (torso + pernas)."""
+
         self.image.fill((0, 0, 0, 0))
 
-        # Escolhe sprite das pernas
         if self.leg_state == "idle":
             legs_sprite = self.sprites["idle_legs"][self.leg_frame]
         else:
@@ -77,12 +73,12 @@ class Player:
 
         torso_sprite = self.sprites["torso"]
 
-        # Flip horizontal conforme direção
         if self.facing == -1:
             torso_sprite = pygame.transform.flip(torso_sprite, True, False)
             legs_sprite = pygame.transform.flip(legs_sprite, True, False)
 
-        # Combinação torso + pernas
+        # Combinação
+
         legs_y = self.image.get_height() - self.sprites["legs_height"]
         overlap = 15
         torso_y = legs_y - self.sprites["torso_height"] + overlap
@@ -90,7 +86,6 @@ class Player:
         self.image.blit(torso_sprite, (0, torso_y))
 
     def update_animation(self, dt):
-        """Atualiza frames de animação."""
         self.animation_timer += dt
         if self.animation_timer >= self.animation_speed:
             self.animation_timer = 0
@@ -100,7 +95,8 @@ class Player:
                 self.leg_frame = (self.leg_frame + 1) % len(self.sprites["run_legs"])
             self.update_sprite()
 
-    # ---------- 🎮 CONTROLO ----------
+    # Teclas
+
     def handle_input(self, keys):
         move_x = 0
         self.moving = False
@@ -131,12 +127,14 @@ class Player:
         if not jump_pressed:
             self.jump_held = False
 
-        # Movimento horizontal limitado pelo cenário
+        # Bloquear a saída da tela
+
         self.rect.x += move_x
         if self.bg_width:
             self.rect.x = max(0, min(self.rect.x, self.bg_width - self.rect.width))
 
-    # ---------- 🪂 GRAVIDADE E COLISÕES ----------
+    # Colisões
+
     def apply_gravity(self):
         self.vel_y += PLAYER_GRAVITY
         self.rect.y += self.vel_y
@@ -157,22 +155,22 @@ class Player:
                 continue
 
             if self.rect.colliderect(plat):
-                # Colisão por cima
+                
                 if self.vel_y > 0 and self.rect.bottom > plat.top and self.rect.top < plat.top:
                     self.rect.bottom = plat.top
                     on_ground = True
                     self.vel_y = 0
-                # Colisão inferior
+                
                 elif self.vel_y < 0 and self.rect.top < plat.bottom and self.rect.bottom > plat.bottom:
                     self.rect.top = plat.bottom
                     self.vel_y = 0
-                # Laterais
+                
                 elif self.rect.right > plat.left and self.rect.left < plat.left:
                     self.rect.right = plat.left
                 elif self.rect.left < plat.right and self.rect.right > plat.right:
                     self.rect.left = plat.right
 
-        # Colisão com o chão
+        
         if self.rect.bottom >= HEIGHT:
             self.rect.bottom = HEIGHT
             on_ground = True
@@ -180,7 +178,8 @@ class Player:
 
         return on_ground
 
-    # ---------- ❤️ VIDA E HUD ----------
+    # HP
+
     def take_damage(self, amount):
         self.hp = max(0, self.hp - amount)
         if self.hp == 0:

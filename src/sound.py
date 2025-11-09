@@ -12,23 +12,21 @@ class SoundManager:
             self.enabled = False
 
     def play_music(self, filename: str):
-        """ Música loop."""
         if not self.enabled:
             return
         try:
             path = load_sound_path(filename)
             pygame.mixer.music.load(path)
             pygame.mixer.music.play(-1)
-            print(f"[Som] Música iniciada: {path}")
+            #print(f"[Som] Música iniciada: {path}")
         except Exception as e:
             print(f"[Som] Erro: {e}")
 
     def stop_music(self):
-        """STOP Música"""
         if not self.enabled:
             return
         try:
             pygame.mixer.music.stop()
-            print("[Som] Música parada.")
+            #print("[Som] Música parada.")
         except Exception as e:
-            print(f"[Som] Erro ao parar música: {e}")
+            print(f"[Som] Erro ao parar: {e}")

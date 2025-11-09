@@ -2,8 +2,6 @@ import pygame
 import sys
 from config import WIDTH, HEIGHT, FPS
 
-
-# ---------- MENU PRINCIPAL ----------
 class Menu:
     def __init__(self, game):
         self.game = game
@@ -58,7 +56,6 @@ class Menu:
             sys.exit()
 
 
-# ---------- SUBMENU DE OPÇÕES ----------
 class MenuOptions:
     def __init__(self, game):
         self.game = game
@@ -121,7 +118,6 @@ class MenuOptions:
             pygame.mixer.music.set_volume(self.volume / 100)
 
     def handle_input(self, keys):
-        """Volume suave (mantendo tecla premida)"""
         if self.selected == 2:
             change = 0
             if keys[pygame.K_LEFT]:

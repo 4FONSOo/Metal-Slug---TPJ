@@ -11,7 +11,7 @@ ENEMY_MAX_HP = 100
 
 class Enemy:
     def __init__(self, image, x, y):
-        # escala suave
+        
         self.scale = getattr(self, "scale", 1.0)
         if self.scale != 1.0:
             w = int(image.get_width() * self.scale)
@@ -19,12 +19,12 @@ class Enemy:
             image = pygame.transform.smoothscale(image, (w, h))
         self.image = image
 
-        # orientação base da sprite (True = olha para a direita / False = esquerda)
+        # Orientação, parece que resolvi, até ver!!!!!
         self.faces_right = getattr(self, "faces_right", True)
 
         self.rect = self.image.get_rect(topleft=(x, y))
         self.vel_y = 0
-        self.direction = random.choice([-1, 1])  # -1 = esquerda, +1 = direita
+        self.direction = random.choice([-1, 1])
         self.platforms = []
         self.last_jump = pygame.time.get_ticks()
         self.jump_delay = random.randint(*ENEMY_JUMP_INTERVAL)
@@ -58,7 +58,9 @@ class Enemy:
         return on_ground
 
     def move(self):
-        # margem anti-“flip tremido” nos limites
+        
+        #método para tentar para tremeliques
+
         margin = 5
         self.rect.x += self.direction * self.speed
         if self.direction > 0 and self.rect.right > self.max_x - margin:
@@ -89,15 +91,6 @@ class Enemy:
         self.apply_gravity()
 
     def _needs_flip(self) -> bool:
-        """
-        Decide o flip com base na orientação base e direção atual:
-        - Se a sprite base olha para a direita:
-            * mover para a esquerda => flip True
-            * mover para a direita => flip False
-        - Se a sprite base olha para a esquerda:
-            * mover para a direita => flip True
-            * mover para a esquerda => flip False
-        """
         if self.faces_right:
             return self.direction < 0
         else:
@@ -123,9 +116,6 @@ class Enemy:
     def maybe_shoot(self, projectiles, bg_width):
         pass
 
-
-# ---------- Tipos (ajuste de orientação base) ----------
-# Assumindo que os Rebel*.png OLHAM PARA A ESQUERDA por defeito:
 class EnemySoldier(Enemy):
     faces_right = False
     scale = 0.95

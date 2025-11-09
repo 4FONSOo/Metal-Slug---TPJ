@@ -110,6 +110,8 @@ class Game:
         self.flash_color = color
         self.flash_frames = frames
 
+    # Cheats
+
     def process_cheat_key(self, event) -> bool:
         if event.type != pygame.KEYDOWN:
             return False
@@ -169,8 +171,6 @@ class Game:
         self.state = "menu"
 
     def start_game(self):
-        
-        print(f"[DEBUG MAIN] Iniciando jogo com personagem: {self.player_choice} ({type(self.player_choice)})")
 
         self.state = "playing"
         self.level = load_level()
@@ -190,7 +190,7 @@ class Game:
         
         
         if not hasattr(self.player, "facing"):
-            self.player.facing = 1  # garante atributo
+            self.player.facing = 1
 
         self.enemy_manager = EnemyManager(self.bg_width, self.platforms)
         self.enemies = self.enemy_manager.get_enemies()
@@ -237,11 +237,12 @@ class Game:
 
         if self.player and not self.player.alive:
             self.handle_game_over()
-            return  # evita continuar o frame com estado limpo
+            return  # está limpo? limpa frame
 
     def handle_player_shoot(self):
         if not self.player:
             return
+        
         keys = pygame.key.get_pressed()
         if not keys[pygame.K_SPACE]:
             self.shoot_pressed = False
@@ -332,7 +333,7 @@ class Game:
 
             self.handle_collisions()
             if self.state != "playing":
-                return  # se game over aconteceu dentro de handle_collisions
+                return
 
             for text in self.floating_texts:
                 text.update()
@@ -355,7 +356,7 @@ class Game:
             self.enemy_manager.draw(self.screen, self.POV)
 
         if self.player:
-            # desenha a sprite do jogador com flip conforme facing (sem alterar a imagem base)
+            # Atenção á direção da imagem, neste caso não me apeteceu fazer photoshop (se usar na direção oposto, isto torna-se obsoleto) e está a dar asneira!!!!
             img = pygame.transform.flip(self.player.image, self.player.facing < 0, False)
             self.screen.blit(img, (self.player.rect.x - self.POV, self.player.rect.y))
 
@@ -388,6 +389,6 @@ class Game:
 
 if __name__ == "__main__":
     
-    print("[DEBUG MAIN] A iniciar Metal Slug 2D...")
+    print("[DEBUG MAIN] Welcome to my Metal Slug 2D...")
 
     Game().run()

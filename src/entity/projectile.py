@@ -1,4 +1,3 @@
-# src/entity/projectile.py
 import pygame
 
 PROJECTILE_SPEED = 12
@@ -22,8 +21,7 @@ class Projectile:
         self.flash_color = (255, 255, 200)
 
     def update(self):
-        if not self.alive:
-            # animação curta do flash de impacto
+        if not self.alive:            
             if self.hit_flash > 0:
                 self.hit_flash -= 1
             return
@@ -37,7 +35,6 @@ class Projectile:
             self.hit_flash = 0
 
     def draw(self, screen, camera_x):
-        # se o projétil já morreu, pode mostrar o flash
         if not self.alive:
             if self.hit_flash > 0:
                 radius = 6 + (2 - self.hit_flash) * 2
@@ -50,14 +47,12 @@ class Projectile:
                 self.hit_flash -= 1
             return
 
-        # desenha projétil ativo
+        # Projécteis, Bola -> eu // Quadrado -> outros
         if self.color == (100, 200, 255):
-            # 🔵 jogador — bolinha
             pygame.draw.circle(
                 screen, self.color, (self.rect.centerx - camera_x, self.rect.centery), 5
             )
         else:
-            # 🔴 inimigo — quadrado
             pygame.draw.rect(
                 screen,
                 self.color,
@@ -65,6 +60,5 @@ class Projectile:
             )
 
     def trigger_hit(self):
-        """Ativa o flash de impacto (chamado quando há colisão)."""
         self.alive = False
         self.hit_flash = 2

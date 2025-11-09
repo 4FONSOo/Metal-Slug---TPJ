@@ -1,4 +1,6 @@
-# src/debug_check_imports.py
+
+#Fica aqui guardado just in case................obsoleto neste momento
+
 import sys
 import importlib
 import pkgutil
