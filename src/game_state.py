@@ -12,6 +12,7 @@ from sound import SoundManager
 
 print("[DEBUG] main carregado de:", __file__)
 
+
 def draw_text_with_outline(surface, text, font, x, y, color, outline_color=(0, 0, 0)):
     text_surface = font.render(text, True, color)
     outline_surface = font.render(text, True, outline_color)
@@ -111,7 +112,6 @@ class Game:
         self.flash_frames = frames
 
     # Cheats
-
     def process_cheat_key(self, event) -> bool:
         if event.type != pygame.KEYDOWN:
             return False
@@ -171,7 +171,6 @@ class Game:
         self.state = "menu"
 
     def start_game(self):
-
         self.state = "playing"
         self.level = load_level()
         self.sound.stop_music()
@@ -184,11 +183,9 @@ class Game:
         self.player = Player(x=15, y=0, character=self.player_choice)
         print(f"[DEBUG MAIN] Player criado: {self.player} (rect={self.player.rect})")
 
-        
         self.player.platforms = self.platforms
         self.player.set_level_limits(self.bg_width)
-        
-        
+
         if not hasattr(self.player, "facing"):
             self.player.facing = 1
 
@@ -242,7 +239,7 @@ class Game:
     def handle_player_shoot(self):
         if not self.player:
             return
-        
+
         keys = pygame.key.get_pressed()
         if not keys[pygame.K_SPACE]:
             self.shoot_pressed = False
@@ -309,11 +306,6 @@ class Game:
             keys = pygame.key.get_pressed()
             if self.player:
                 self.player.handle_input(keys)
-                # atualiza facing sem mexer na sprite base
-                if keys[pygame.K_LEFT]:
-                    self.player.facing = -1
-                elif keys[pygame.K_RIGHT]:
-                    self.player.facing = 1
 
                 dt = self.clock.get_time()
                 self.player.update_animation(dt)
@@ -356,9 +348,8 @@ class Game:
             self.enemy_manager.draw(self.screen, self.POV)
 
         if self.player:
-            # Atenção á direção da imagem, neste caso não me apeteceu fazer photoshop (se usar na direção oposto, isto torna-se obsoleto) e está a dar asneira!!!!
-            img = pygame.transform.flip(self.player.image, self.player.facing < 0, False)
-            self.screen.blit(img, (self.player.rect.x - self.POV, self.player.rect.y))
+            # Agora deixamos o Player tratar do flip internamente via self.facing/update_sprite()
+            self.screen.blit(self.player.image, (self.player.rect.x - self.POV, self.player.rect.y))
 
         for proj in self.projectiles + self.enemy_projectiles:
             if proj:
@@ -388,7 +379,5 @@ class Game:
 
 
 if __name__ == "__main__":
-    
     print("[DEBUG MAIN] Welcome to my Metal Slug 2D...")
-
     Game().run()
