@@ -5,7 +5,7 @@ from resource import load_enemy
 from entity.projectile import Projectile
 
 ENEMY_GRAVITY = 1
-ENEMY_JUMP_INTERVAL = (2000, 5000)
+ENEMY_JUMP_INTERVAL = (500, 1000)
 ENEMY_MAX_HP = 100
 
 
@@ -19,15 +19,27 @@ class Enemy:
             image = pygame.transform.smoothscale(image, (w, h))
         self.image = image
 
-        # Orientação, parece que resolvi, até ver!!!!!
+        # Orientação
         self.faces_right = getattr(self, "faces_right", True)
 
         self.rect = self.image.get_rect(topleft=(x, y))
         self.vel_y = 0
         self.direction = random.choice([-1, 1])
         self.platforms = []
+
+        # -------- NOVO: estado de chão --------
+        self.on_ground = False
+
+        # -------- NOVO: parâmetros de salto por inimigo --------
+        # Cada subclasse pode definir jump_interval, jump_force_min, jump_force_max
+        self.jump_interval = getattr(self, "jump_interval", ENEMY_JUMP_INTERVAL)
+        self.jump_force_min = getattr(self, "jump_force_min", -18)
+        self.jump_force_max = getattr(self, "jump_force_max", -10)
+
+        # Tempos de salto usando o intervalo deste inimigo
         self.last_jump = pygame.time.get_ticks()
-        self.jump_delay = random.randint(*ENEMY_JUMP_INTERVAL)
+        self.jump_delay = random.randint(*self.jump_interval)
+
         self.hp = ENEMY_MAX_HP
         self.alive = True
 
@@ -45,22 +57,27 @@ class Enemy:
     def apply_gravity(self):
         self.vel_y += ENEMY_GRAVITY
         self.rect.y += self.vel_y
+
         on_ground = False
+
         for plat in self.platforms:
             if self.rect.colliderect(plat) and self.rect.bottom - self.vel_y <= plat.top:
                 self.rect.bottom = plat.top
                 self.vel_y = 0
                 on_ground = True
+
         if self.rect.bottom >= HEIGHT:
             self.rect.bottom = HEIGHT
             self.vel_y = 0
             on_ground = True
+
+        # -------- NOVO: guardar estado de chão --------
+        self.on_ground = on_ground
+
         return on_ground
 
     def move(self):
-        
-        #método para tentar para tremeliques
-
+        # método para tentar parar tremeliques
         margin = 5
         self.rect.x += self.direction * self.speed
         if self.direction > 0 and self.rect.right > self.max_x - margin:
@@ -69,14 +86,23 @@ class Enemy:
             self.direction = 1
 
     def maybe_jump(self):
+        # -------- NOVO: só salta se estiver no chão --------
+        if not self.on_ground:
+            return
+
         now = pygame.time.get_ticks()
         if now - self.last_jump >= self.jump_delay:
             patrol_dist = self.max_x - self.min_x
-            jump_height = -10 - int((patrol_dist / 100) * 2)
-            jump_height = max(-18, min(jump_height, -10))
+
+            # altura base calculada com o patrol, mas
+            # CLAMP por jump_force_min / jump_force_max específicos do inimigo
+            jump_height = self.jump_force_max - int((patrol_dist / 100) * 2)
+            jump_height = max(self.jump_force_min, min(jump_height, self.jump_force_max))
+
             self.vel_y = jump_height
             self.last_jump = now
-            self.jump_delay = random.randint(*ENEMY_JUMP_INTERVAL)
+            # usar intervalo de salto específico deste inimigo
+            self.jump_delay = random.randint(*self.jump_interval)
 
     def take_damage(self, amount):
         self.hp = max(0, self.hp - amount)
@@ -87,8 +113,8 @@ class Enemy:
         if not self.alive:
             return
         self.move()
+        self.apply_gravity()   # atualiza self.on_ground
         self.maybe_jump()
-        self.apply_gravity()
 
     def _needs_flip(self) -> bool:
         if self.faces_right:
@@ -116,6 +142,7 @@ class Enemy:
     def maybe_shoot(self, projectiles, bg_width):
         pass
 
+
 class EnemySoldier(Enemy):
     faces_right = False
     scale = 0.95
@@ -123,6 +150,11 @@ class EnemySoldier(Enemy):
     damage = 10
     points = 100
     shoot_interval = (3000, 6000)
+
+    # -------- NOVO: salto médio, intervalo médio --------
+    jump_interval = (600, 1200)
+    jump_force_min = -16
+    jump_force_max = -10
 
     def maybe_shoot(self, projectiles, bg_width):
         now = pygame.time.get_ticks()
@@ -142,6 +174,11 @@ class EnemyShooter(Enemy):
     points = 150
     shoot_interval = (2000, 4000)
 
+    # -------- NOVO: salta pouco e raramente --------
+    jump_interval = (1400, 2400)
+    jump_force_min = -14
+    jump_force_max = -9
+
     def maybe_shoot(self, projectiles, bg_width):
         now = pygame.time.get_ticks()
         if now - self.last_shot >= random.randint(*self.shoot_interval):
@@ -160,6 +197,11 @@ class EnemyHeavy(Enemy):
     points = 200
     shoot_interval = (3000, 5000)
 
+    # -------- NOVO: quase não salta, salto baixinho --------
+    jump_interval = (1800, 3000)
+    jump_force_min = -13
+    jump_force_max = -8
+
     def maybe_shoot(self, projectiles, bg_width):
         now = pygame.time.get_ticks()
         if now - self.last_shot >= random.randint(*self.shoot_interval):
@@ -173,10 +215,15 @@ class EnemyHeavy(Enemy):
 class EnemyFast(Enemy):
     faces_right = False
     scale = 0.85
-    speed = 3.5
+    speed = 7.5
     damage = 15
     points = 120
-    shoot_interval = (3500, 6500)
+    shoot_interval = (1500, 3500)
+
+    # -------- NOVO: salta alto e muitas vezes --------
+    jump_interval = (400, 900)
+    jump_force_min = -20
+    jump_force_max = -12
 
     def maybe_shoot(self, projectiles, bg_width):
         now = pygame.time.get_ticks()

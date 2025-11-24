@@ -50,7 +50,7 @@ class GameState:
     def __init__(self):
         self.score = 0
         self.credits = 5
-        self.time_left = 15
+        self.time_left = 60
         self.level_name = "Nível 1"
         self.paused = False
         self.timer_event = pygame.USEREVENT + 1
@@ -200,6 +200,60 @@ class Game:
 
         self.run_game_loop()
 
+    def try_melee_attack(self):
+        """Ataque corpo-a-corpo tipo 'faca': se houver inimigo perto e à frente do jogador, dá insta-kill."""
+        if not self.player:
+            return False
+
+        if not self.enemies:
+            return False
+
+        player_rect = self.player.rect
+        facing = getattr(self.player, "facing", 1)
+
+        # Área de melee à frente do jogador
+        melee_width = 60   # alcance horizontal adicional
+        melee_height = 20  # ligeiro alargamento vertical
+
+        melee_rect = player_rect.inflate(melee_width, melee_height)
+
+        # Empurrar a caixa de melee para a frente do jogador
+        if facing == 1:
+            melee_rect.x += melee_width // 2
+        else:
+            melee_rect.x -= melee_width // 2
+
+        alvo = None
+        for enemy in self.enemies:
+            if not enemy or not enemy.alive:
+                continue
+            if not melee_rect.colliderect(enemy.rect):
+                continue
+
+            # Garante que está à frente do jogador
+            if facing == 1 and enemy.rect.centerx < player_rect.centerx:
+                continue
+            if facing == -1 and enemy.rect.centerx > player_rect.centerx:
+                continue
+
+            alvo = enemy
+            break
+
+        if not alvo:
+            return False
+
+        # Insta-kill
+        alvo.take_damage(9999)
+
+        if not alvo.alive:
+            points = getattr(alvo, "points", 100)
+            self.game_state.score += points
+            self.floating_texts.append(
+                FloatingText(f"+{points}", alvo.rect.centerx, alvo.rect.top)
+            )
+
+        return True
+
     def handle_collisions(self):
         for enemy in self.enemies:
             if not enemy.alive:
@@ -225,7 +279,7 @@ class Game:
                 if not enemy.alive:
                     continue
                 if self.player.rect.colliderect(enemy.rect):
-                    self.player.take_damage(enemy.damage * 0.5)
+                    self.player.take_damage(enemy.damage * 0.1)
                     enemy.take_damage(0.5)
 
         self.enemies = [e for e in self.enemies if e.alive]
@@ -244,6 +298,11 @@ class Game:
         if not keys[pygame.K_SPACE]:
             self.shoot_pressed = False
         if keys[pygame.K_SPACE] and not self.shoot_pressed:
+            # Primeiro tenta ataque melee (faca) se houver inimigo perto
+            if self.try_melee_attack():
+                self.shoot_pressed = True
+                return
+
             shoot_up = keys[pygame.K_UP]
             shoot_down = keys[pygame.K_DOWN]
             dir_x, dir_y = self.player.facing, 0
