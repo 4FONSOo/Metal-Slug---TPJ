@@ -7,6 +7,8 @@ from entity.projectile import Projectile
 ENEMY_GRAVITY = 1
 ENEMY_JUMP_INTERVAL = (500, 1000)
 ENEMY_MAX_HP = 100
+ENEMY_CONTACT_PLAYER_FACTOR = 0.1   # percentagem do dano base aplicada ao jogador em contacto
+ENEMY_CONTACT_SELF_DAMAGE = 0.5     # dano que o inimigo leva quando há contacto com o jogador
 
 
 class Enemy:
@@ -50,6 +52,19 @@ class Enemy:
         self.points = getattr(self, "points", 100)
         self.shoot_interval = getattr(self, "shoot_interval", (3000, 6000))
         self.last_shot = pygame.time.get_ticks()
+
+    #Contacto vindo do game_state
+
+    def contact_damage_to_player(self):
+        """Quanto dano este inimigo causa ao jogador num contacto físico."""
+        return self.damage * ENEMY_CONTACT_PLAYER_FACTOR
+
+    def contact_self_damage(self):
+        """Quanto dano este inimigo leva quando colide fisicamente com o jogador."""
+        return ENEMY_CONTACT_SELF_DAMAGE
+
+    #fim de contacto
+
 
     def set_platforms(self, platforms):
         self.platforms = platforms

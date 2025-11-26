@@ -45,7 +45,7 @@ class FloatingText:
         text_surf.set_alpha(self.alpha)
         surface.blit(text_surf, (self.x - camera_x, self.y))
 
-
+"""
 class GameState:
     def __init__(self):
         self.score = 0
@@ -65,7 +65,39 @@ class GameState:
 
     def reset(self):
         self.__init__()
+"""
 
+class GameState:
+    def __init__(self):
+        # >>> antes: valores hardcoded
+        # self.score = 0
+        # self.credits = 5
+        # self.time_left = 60
+        # self.level_name = "Nível 1"
+        # self.paused = False
+        # self.timer_event = pygame.USEREVENT + 1
+        # pygame.time.set_timer(self.timer_event, 1000)
+
+        # >>> agora: tudo vem do config
+        self.score = INITIAL_SCORE
+        self.credits = INITIAL_CREDITS
+        self.time_left = INITIAL_TIME_LEFT
+        self.level_name = INITIAL_LEVEL_NAME
+        self.paused = False
+
+        # usamos um offset configurável em vez de +1 “solto”
+        self.timer_event = pygame.USEREVENT + TIMER_EVENT_INDEX
+        pygame.time.set_timer(self.timer_event, TIMER_INTERVAL_MS)
+
+    def update_time(self):
+        if not self.paused and self.time_left > 0:
+            self.time_left -= 1
+
+    def toggle_pause(self):
+        self.paused = not self.paused
+
+    def reset(self):
+        self.__init__()
 
 class Game:
     def __init__(self):
@@ -279,8 +311,8 @@ class Game:
                 if not enemy.alive:
                     continue
                 if self.player.rect.colliderect(enemy.rect):
-                    self.player.take_damage(enemy.damage * 0.1)
-                    enemy.take_damage(0.5)
+                    self.player.take_damage(enemy.contact_damage_to_player())
+                    enemy.take_damage(enemy.contact_self_damage())
 
         self.enemies = [e for e in self.enemies if e.alive]
         self.projectiles = [p for p in self.projectiles if p and (p.alive or p.hit_flash > 0)]
