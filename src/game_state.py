@@ -1,21 +1,41 @@
-import pygame
+# game_state.py
+"""
+Cérebro principal do jogo:
+- loop global
+- estado (pontuação, tempo, dificuldade)
+- gestão de cenas (menu, nível)
+- cheats, HUD, etc.
+
+Nota: aqui não se importa pygame directamente, só pg_engine.
+"""
+
 import sys
 
-from config import *
-from resource import load_player
+import pg_engine as pg
+import config
+import controls
+
+from scene import Scene
+from cheats import CheatEngine
+from input_manager import is_fire_pressed, get_shoot_direction
+
 from entity.player import Player
 from entity.enemy import EnemyManager
 from entity.projectile import Projectile
 from scenes.Lvl1 import load_level
-from scenes.menu import Menu
 from sound import SoundManager
+from config import DIFFICULTY_PRESETS, DEFAULT_DIFFICULTY, CHEAT_CODES
+from pg_engine import Vector2
+from score import ScoreManager, EnterNameScene, HighScoreScene
 
-print("[DEBUG] main carregado de:", __file__)
+# Import no fim do ficheiro para evitar circular? Não, aqui é seguro:
+from scenes.menu import Menu as MenuScene  # cena de menu principal
 
 
 def draw_text_with_outline(surface, text, font, x, y, color, outline_color=(0, 0, 0)):
-    text_surface = font.render(text, True, color)
-    outline_surface = font.render(text, True, outline_color)
+    """Texto com contorno maroto, para o HUD não desaparecer no fundo."""
+    text_surface = pg.render_text(font, text, color)
+    outline_surface = pg.render_text(font, text, outline_color)
     for dx in [-1, 0, 1]:
         for dy in [-1, 0, 1]:
             if dx != 0 or dy != 0:
@@ -24,164 +44,237 @@ def draw_text_with_outline(surface, text, font, x, y, color, outline_color=(0, 0
 
 
 class FloatingText:
-    def __init__(self, text, x, y, color=(255, 255, 0)):
+    """Texto flutuante tipo '+100', a subir e a desvanecer."""
+
+    def __init__(self, text, x, y, color=None):
         self.text = text
         self.x = x
         self.y = y
-        self.color = color
+        self.color = color or config.FLOATING_TEXT_COLOR_DEFAULT
         self.alpha = 255
-        self.lifetime = 60
-        self.font = pygame.font.SysFont("Arial", 22)
+        self.lifetime = config.FLOATING_TEXT_LIFETIME_FRAMES
+        self.font = pg.create_font(
+            config.FLOATING_TEXT_FONT_NAME,
+            config.FLOATING_TEXT_FONT_SIZE,
+        )
 
     def update(self):
-        self.y -= 1
-        self.alpha -= 4
+        """Sobe, perde opacidade e vai à vida quando a lifetime chega ao fim."""
+        self.y -= config.FLOATING_TEXT_RISE_SPEED
+        self.alpha -= config.FLOATING_TEXT_ALPHA_STEP
         self.lifetime -= 1
         if self.alpha < 0:
             self.alpha = 0
 
     def draw(self, surface, camera_x):
-        text_surf = self.font.render(self.text, True, self.color)
+        text_surf = pg.render_text(self.font, self.text, self.color)
         text_surf.set_alpha(self.alpha)
         surface.blit(text_surf, (self.x - camera_x, self.y))
 
-"""
+
 class GameState:
-    def __init__(self):
-        self.score = 0
-        self.credits = 5
-        self.time_left = 60
-        self.level_name = "Nível 1"
+    """
+    Estado lógico “abstrato” do jogo:
+      - pontuação
+      - créditos (ainda por usar)
+      - tempo
+      - nome do nível
+      - pausa
+    """
+
+    def __init__(
+        self,
+        initial_score=config.INITIAL_SCORE,
+        initial_credits=config.INITIAL_CREDITS,
+        initial_time=config.INITIAL_TIME_LEFT,
+        level_name=config.INITIAL_LEVEL_NAME,
+    ):
+        self.score = initial_score
+        self.credits = initial_credits      # ainda não usado, mas já cá fica
+        self.time_left = initial_time
+        self.level_name = level_name        # idem, para futuros níveis
         self.paused = False
-        self.timer_event = pygame.USEREVENT + 1
-        pygame.time.set_timer(self.timer_event, 1000)
+
+        # Evento de timer (1x por segundo)
+        self.timer_event = config.TIMER_EVENT_ID
+        pg.time_set_timer(self.timer_event, config.TIMER_INTERVAL_MS)
 
     def update_time(self):
+        """Desconta 1 segundo se não estiver em pausa."""
         if not self.paused and self.time_left > 0:
             self.time_left -= 1
 
     def toggle_pause(self):
         self.paused = not self.paused
 
-    def reset(self):
-        self.__init__()
-"""
-
-class GameState:
-    def __init__(self):
-        # >>> antes: valores hardcoded
-        # self.score = 0
-        # self.credits = 5
-        # self.time_left = 60
-        # self.level_name = "Nível 1"
-        # self.paused = False
-        # self.timer_event = pygame.USEREVENT + 1
-        # pygame.time.set_timer(self.timer_event, 1000)
-
-        # >>> agora: tudo vem do config
-        self.score = INITIAL_SCORE
-        self.credits = INITIAL_CREDITS
-        self.time_left = INITIAL_TIME_LEFT
-        self.level_name = INITIAL_LEVEL_NAME
-        self.paused = False
-
-        # usamos um offset configurável em vez de +1 “solto”
-        self.timer_event = pygame.USEREVENT + TIMER_EVENT_INDEX
-        pygame.time.set_timer(self.timer_event, TIMER_INTERVAL_MS)
-
-    def update_time(self):
-        if not self.paused and self.time_left > 0:
-            self.time_left -= 1
-
-    def toggle_pause(self):
-        self.paused = not self.paused
-
-    def reset(self):
-        self.__init__()
 
 class Game:
+    """Motor principal: gere janela, som, dificuldades, cenas, etc."""
+
     def __init__(self):
-        pygame.init()
-        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
-        pygame.display.set_caption(WINDOW_TITLE)
-        self.clock = pygame.time.Clock()
-        self.font = pygame.font.SysFont("Arial", 24)
+        pg.init()
+        self.screen = pg.create_window(config.WIDTH, config.HEIGHT, config.WINDOW_TITLE)
+        self.clock = pg.create_clock()
+        self.font = pg.create_font(config.HUD_FONT_NAME, config.HUD_FONT_SIZE)
         self.sound = SoundManager()
 
-        self.running = True
-        self.state = "menu"
-        self.menu = Menu(self)
-        self.game_state = GameState()
+        # Sistema de scores (pontuação actual + highscores)
+        self.score_manager = ScoreManager()
 
+        # Cena actual (menu, nível, etc.)
+        self.current_scene: Scene | None = None
+        self.running = True
+
+        # Nível / cenário
         self.level = None
         self.background = None
-        self.bg_width = WIDTH
-        self.platforms = []
+        self.bg_width = config.WIDTH
+        self.platforms: list[pg.Rect] = []
 
-        self.player_choice = "player_2"
-        self.player = None
-        self.enemy_manager = None
-        self.enemies = []
-        self.projectiles = []
-        self.enemy_projectiles = []
-        self.floating_texts = []
+        # Jogador / inimigos / projécteis
+        self.player_choice = "player1"
+        self.player: Player | None = None
+        self.enemy_manager: EnemyManager | None = None
+        self.enemies: list[object] = []
+        self.projectiles: list[Projectile] = []          # projécteis do jogador
+        self.enemy_projectiles: list[Projectile] = []    # projécteis dos inimigos
+        self.floating_texts: list[FloatingText] = []
+
+        # Disparo / mira
         self.shoot_pressed = False
+        self.last_shot_time = 0
+        self.aim_dir = Vector2(1, 0)
+
+        # POV = deslocamento da “câmara” horizontal
         self.POV = 0
 
-        self.cheats = {
-            "GOD": {"progress": 0, "active": False},
-            "TIME": {"progress": 0, "active": False},
-            "SPJ": {"progress": 0, "active": False},
-        }
+        # Dificuldade
+        self.difficulty = DEFAULT_DIFFICULTY
+        self.difficulty_preset = DIFFICULTY_PRESETS[self.difficulty]
+
+        # Estado lógico (score / tempo / etc.)
+        self.game_state: GameState | None = None
+
+        # Cheats
+        self.cheat_engine = CheatEngine(CHEAT_CODES)
         self.god_mode = False
         self.infinite_time = False
         self.super_jump = False
+
+        # FX de flash de ecrã
         self.flash_color = None
         self.flash_frames = 0
 
-    def flash(self, color, frames=5):
-        self.flash_color = color
-        self.flash_frames = frames
+        # Começamos no menu principal
+        self.change_scene(MenuScene(self))
 
-    # Cheats
-    def process_cheat_key(self, event) -> bool:
-        if event.type != pygame.KEYDOWN:
+    # -----------------------------
+    # GESTÃO DE CENAS
+    # -----------------------------
+    def change_scene(self, new_scene: Scene):
+        """Troca de cena de forma civilizada."""
+        if self.current_scene is not None:
+            self.current_scene.on_exit()
+        self.current_scene = new_scene
+        self.current_scene.on_enter()
+
+    # -----------------------------
+    # DIFICULDADE
+    # -----------------------------
+    def update_difficulty_preset(self):
+        """Actualiza o preset de dificuldade actual a partir da config."""
+        self.difficulty_preset = DIFFICULTY_PRESETS.get(
+            self.difficulty,
+            DIFFICULTY_PRESETS[DEFAULT_DIFFICULTY],
+        )
+
+    def _get_initial_time_for_difficulty(self) -> int:
+        preset = self.difficulty_preset
+        mult = preset.get("TIME_MULTIPLIER", 1.0)
+        return int(config.INITIAL_TIME_LEFT * mult)
+
+    def _get_player_max_hp_for_difficulty(self) -> int:
+        preset = self.difficulty_preset
+        mult = preset.get("PLAYER_HP_MULTIPLIER", 1.0)
+        return int(config.PLAYER_MAX_HP * mult)
+
+    def _get_enemy_params_for_difficulty(self):
+        preset = self.difficulty_preset
+        max_spawns = preset.get(
+            "ENEMY_MAX_SPAWNS",
+            config.ENEMY_MANAGER_MAX_SPAWNS_DEFAULT,
+        )
+        max_active = preset.get(
+            "ENEMY_MAX_ACTIVE",
+            config.ENEMY_MANAGER_MAX_ACTIVE_DEFAULT,
+        )
+        damage_multiplier = preset.get("ENEMY_DAMAGE_MULTIPLIER", 1.0)
+        return max_spawns, max_active, damage_multiplier
+
+    # -----------------------------
+    # FX
+    # -----------------------------
+    def flash(self, color, frames=None):
+        """Flash no ecrã com uma cor, durante N frames (por defeito poucos)."""
+        self.flash_color = color
+        self.flash_frames = frames if frames is not None else config.SCREEN_FLASH_DEFAULT_FRAMES
+
+    # -----------------------------
+    # CHEATS
+    # -----------------------------
+    def process_cheats(self, event) -> bool:
+        """
+        Processa um evento à procura de sequências de cheats.
+
+        Devolve:
+          - True se o evento foi consumido pelo sistema de cheats
+        """
+        if event.type != pg.KEYDOWN:
             return False
-        key_char = pygame.key.name(event.key).upper()
-        consumed = False
-        for code, data in self.cheats.items():
-            expected = code[data["progress"]] if data["progress"] < len(code) else None
-            if key_char == expected:
-                data["progress"] += 1
-                consumed = True
-                if data["progress"] == len(code):
-                    data["active"] = not data["active"]
-                    data["progress"] = 0
-                    if code == "GOD":
-                        self.god_mode = data["active"]
-                        self.flash((255, 255, 0) if self.god_mode else (255, 0, 0))
-                    elif code == "TIME":
-                        self.infinite_time = data["active"]
-                        self.flash((0, 200, 255) if self.infinite_time else (255, 120, 120))
-                    elif code == "SPJ":
-                        import config
-                        self.super_jump = data["active"]
-                        config.PLAYER_JUMP_SPEED = -35 if self.super_jump else -15
-                        self.flash((0, 255, 255) if self.super_jump else (255, 100, 100))
-            else:
-                data["progress"] = 1 if key_char == code[0] else 0
+
+        key_name = pg.key_name(event.key)
+        if not key_name or len(key_name) != 1:
+            return False
+
+        consumed, activations = self.cheat_engine.process_char(key_name)
+        for code, active in activations:
+            if code == "GOD":
+                self.god_mode = active
+                self.flash(
+                    config.CHEAT_FLASH_COLOR_GOD_ON if active else config.CHEAT_FLASH_COLOR_GOD_OFF
+                )
+            elif code == "TIME":
+                self.infinite_time = active
+                self.flash(
+                    config.CHEAT_FLASH_COLOR_TIME_ON if active else config.CHEAT_FLASH_COLOR_TIME_OFF
+                )
+            elif code == "SPJ":
+                self.super_jump = active
+                self.flash(
+                    config.CHEAT_FLASH_COLOR_SPJ_ON if active else config.CHEAT_FLASH_COLOR_SPJ_OFF
+                )
+                if self.player:
+                    self.player.jump_speed = (
+                        config.CHEAT_SUPER_JUMP_VALUE
+                        if active
+                        else config.CHEAT_NORMAL_JUMP_VALUE
+                    )
         return consumed
 
     def reset_all_state(self):
-        import config
-        self.game_state.reset()
-        for c in self.cheats.values():
-            c["progress"] = 0
-            c["active"] = False
+        """Reset total: cheats, estado lógico, entidades e música."""
+        self.cheat_engine.reset_all()
         self.god_mode = False
         self.infinite_time = False
         self.super_jump = False
-        config.PLAYER_JUMP_SPEED = -15
+
+        # Reset da pontuação actual e estado lógico do jogo
+        self.score_manager.reset_current()
+        self.game_state = GameState(
+            initial_score=self.score_manager.current_score,
+            initial_time=self._get_initial_time_for_difficulty(),
+        )
+
         self.player = None
         self.enemy_manager = None
         self.enemies.clear()
@@ -193,67 +286,134 @@ class Game:
         except Exception:
             pass
 
+    # -----------------------------
+    # GAME OVER / START
+    # -----------------------------
     def handle_game_over(self):
+        """Mostra GAME OVER, trata de highscores e volta ao menu."""
+        # Sincroniza pontuação actual com o ScoreManager (por segurança)
+        if self.game_state:
+            self.score_manager.current_score = self.game_state.score
+
+        final_score = self.score_manager.current_score
+
+        # Pára a música e mostra texto de GAME OVER
         self.sound.stop_music()
-        text = self.font.render("GAME OVER", True, (255, 50, 50))
-        self.screen.blit(text, (WIDTH // 2 - text.get_width() // 2, HEIGHT // 2))
-        pygame.display.flip()
-        pygame.time.wait(2000)
+        text = pg.render_text(self.font, "GAME OVER", (255, 50, 50))
+        self.screen.blit(
+            text,
+            (config.WIDTH // 2 - text.get_width() // 2, config.HEIGHT // 2),
+        )
+        pg.display_flip()
+        pg.time_wait(config.GAME_OVER_WAIT_MS)
+
+        # Se o score entrar no top, pedir nome
+        if final_score > 0 and self.score_manager.qualifies_for_highscore():
+            enter_scene = EnterNameScene(self.screen, self.clock, self.score_manager)
+            name = enter_scene.run()
+            if name:
+                self.score_manager.register_current_score(name)
+
+        # Mostrar tabela de highscores (sempre, para ver o estrago)
+        high_scene = HighScoreScene(self.screen, self.clock, self.score_manager)
+        high_scene.run()
+
+        # Reset do estado e voltar ao menu
         self.reset_all_state()
-        self.state = "menu"
+        self.change_scene(MenuScene(self))
 
     def start_game(self):
-        self.state = "playing"
-        self.level = load_level()
-        self.sound.stop_music()
-        self.sound.play_music("theme.mp3")
+        """
+        Arranca um novo jogo:
+          - faz reset de estado
+          - carrega o nível
+          - cria player e inimigos
+          - muda para a cena de jogo (LevelScene)
+        """
+        self.reset_all_state()
 
+        # Nível (TMX)
+        self.level = load_level()
         self.background = self.level["background"]
         self.bg_width = self.level["bg_width"]
         self.platforms = self.level["platforms"]
 
-        self.player = Player(x=15, y=0, character=self.player_choice)
-        print(f"[DEBUG MAIN] Player criado: {self.player} (rect={self.player.rect})")
+        self.sound.stop_music()
+        self.sound.play_music("theme.mp3")
 
+        # Jogador
+        max_hp = self._get_player_max_hp_for_difficulty()
+        jump_speed = (
+            config.CHEAT_SUPER_JUMP_VALUE
+            if self.super_jump
+            else config.CHEAT_NORMAL_JUMP_VALUE
+        )
+
+        self.player = Player(
+            x=15,
+            y=0,
+            character=self.player_choice,
+            max_hp=max_hp,
+            jump_speed=jump_speed,
+        )
         self.player.platforms = self.platforms
         self.player.set_level_limits(self.bg_width)
-
         if not hasattr(self.player, "facing"):
             self.player.facing = 1
 
-        self.enemy_manager = EnemyManager(self.bg_width, self.platforms)
+        # Inimigos
+        max_spawns, max_active, damage_mult = self._get_enemy_params_for_difficulty()
+        self.enemy_manager = EnemyManager(
+            self.bg_width,
+            self.platforms,
+            max_spawns=max_spawns,
+            max_active=max_active,
+            damage_multiplier=damage_mult,
+        )
         self.enemies = self.enemy_manager.get_enemies()
 
+        # Listas de projécteis / textos
         self.projectiles = []
         self.enemy_projectiles = []
         self.floating_texts = []
         self.shoot_pressed = False
         self.POV = 0
 
-        self.run_game_loop()
+        # Muda para a cena de jogo
+        self.change_scene(LevelScene(self))
 
-    def try_melee_attack(self):
-        """Ataque corpo-a-corpo tipo 'faca': se houver inimigo perto e à frente do jogador, dá insta-kill."""
-        if not self.player:
-            return False
+    # -----------------------------
+    # COMBATE / HELPERS USADOS PELO LEVELSCENE
+    # -----------------------------
+    def add_score(self, points: int, x: int | None = None, y: int | None = None):
+        """Adiciona pontos à pontuação actual e, opcionalmente, cria texto flutuante."""
+        if points <= 0:
+            return
 
-        if not self.enemies:
+        # Actualiza o estado lógico e o gestor de scores
+        if self.game_state:
+            self.game_state.score += points
+        if self.score_manager:
+            self.score_manager.add_points(points)
+
+        # Texto flutuante facultativo
+        if x is not None and y is not None:
+            self.floating_texts.append(FloatingText(f"+{points}", x, y))
+
+    def try_melee_attack(self) -> bool:
+        """Tenta ataque melee (faca). Se matar alguém, dá pontos e texto flutuante."""
+        if not self.player or not self.enemies:
             return False
 
         player_rect = self.player.rect
         facing = getattr(self.player, "facing", 1)
 
-        # Área de melee à frente do jogador
-        melee_width = 60   # alcance horizontal adicional
-        melee_height = 20  # ligeiro alargamento vertical
+        melee_rect = player_rect.inflate(config.MELEE_WIDTH, config.MELEE_HEIGHT)
 
-        melee_rect = player_rect.inflate(melee_width, melee_height)
-
-        # Empurrar a caixa de melee para a frente do jogador
         if facing == 1:
-            melee_rect.x += melee_width // 2
+            melee_rect.x += config.MELEE_WIDTH // 2
         else:
-            melee_rect.x -= melee_width // 2
+            melee_rect.x -= config.MELEE_WIDTH // 2
 
         alvo = None
         for enemy in self.enemies:
@@ -262,7 +422,7 @@ class Game:
             if not melee_rect.colliderect(enemy.rect):
                 continue
 
-            # Garante que está à frente do jogador
+            # Só acerta quem estiver à frente (nada de facadas pelas costas)
             if facing == 1 and enemy.rect.centerx < player_rect.centerx:
                 continue
             if facing == -1 and enemy.rect.centerx > player_rect.centerx:
@@ -274,19 +434,18 @@ class Game:
         if not alvo:
             return False
 
-        # Insta-kill
-        alvo.take_damage(9999)
+        # Faca é “one-shot kill”
+        alvo.take_damage(config.MELEE_KILL_DAMAGE)
 
         if not alvo.alive:
             points = getattr(alvo, "points", 100)
-            self.game_state.score += points
-            self.floating_texts.append(
-                FloatingText(f"+{points}", alvo.rect.centerx, alvo.rect.top)
-            )
+            self.add_score(points, alvo.rect.centerx, alvo.rect.top)
 
         return True
 
     def handle_collisions(self):
+        """Trata de todas as colisões: projécteis, player, inimigos, contacto físico."""
+        # Projécteis do jogador em inimigos
         for enemy in self.enemies:
             if not enemy.alive:
                 continue
@@ -295,17 +454,17 @@ class Game:
                     enemy.take_damage(proj.damage)
                     proj.trigger_hit()
                     if not enemy.alive:
-                        self.game_state.score += getattr(enemy, "points", 100)
-                        self.floating_texts.append(
-                            FloatingText(f"+{enemy.points}", enemy.rect.centerx, enemy.rect.top)
-                        )
+                        points = getattr(enemy, "points", 100)
+                        self.add_score(points, enemy.rect.centerx, enemy.rect.top)
 
+        # Projécteis de inimigos em jogador
         if self.player and not self.god_mode:
             for proj in self.enemy_projectiles:
                 if proj and proj.alive and self.player.rect.colliderect(proj.rect):
                     self.player.take_damage(proj.damage)
                     proj.trigger_hit()
 
+        # Contacto físico jogador <-> inimigo
         if self.player and not self.god_mode:
             for enemy in self.enemies:
                 if not enemy.alive:
@@ -314,133 +473,122 @@ class Game:
                     self.player.take_damage(enemy.contact_damage_to_player())
                     enemy.take_damage(enemy.contact_self_damage())
 
+        # Limpar mortos / impactos
         self.enemies = [e for e in self.enemies if e.alive]
-        self.projectiles = [p for p in self.projectiles if p and (p.alive or p.hit_flash > 0)]
-        self.enemy_projectiles = [p for p in self.enemy_projectiles if p and (p.alive or p.hit_flash > 0)]
+        self.projectiles = [
+            p for p in self.projectiles if p and (p.alive or p.hit_flash > 0)
+        ]
+        self.enemy_projectiles = [
+            p for p in self.enemy_projectiles if p and (p.alive or p.hit_flash > 0)
+        ]
 
         if self.player and not self.player.alive:
             self.handle_game_over()
-            return  # está limpo? limpa frame
 
     def handle_player_shoot(self):
+        """
+        Lida com disparo do jogador:
+          - cadência de tiro
+          - melee primeiro, tiro depois
+          - mira “suavizada” com lerp (Vector2)
+        """
         if not self.player:
             return
 
-        keys = pygame.key.get_pressed()
-        if not keys[pygame.K_SPACE]:
+        keys = pg.get_keys()
+
+        # Se não está a carregar no disparo, limpamos estado e saímos
+        if not is_fire_pressed(keys):
             self.shoot_pressed = False
-        if keys[pygame.K_SPACE] and not self.shoot_pressed:
-            # Primeiro tenta ataque melee (faca) se houver inimigo perto
-            if self.try_melee_attack():
-                self.shoot_pressed = True
-                return
+            return
 
-            shoot_up = keys[pygame.K_UP]
-            shoot_down = keys[pygame.K_DOWN]
-            dir_x, dir_y = self.player.facing, 0
+        now = pg.time_get_ticks()
 
-            if shoot_up and not shoot_down:
-                dir_x, dir_y = 0, -1
-                sx, sy = self.player.rect.centerx, self.player.rect.top
-            elif shoot_down and not shoot_up:
-                if self.player.vel_y != 0:
-                    dir_x, dir_y = 0, 1
-                    sx, sy = self.player.rect.centerx, self.player.rect.centery
-                else:
-                    sx, sy = self.player.rect.centerx + (dir_x * 40), self.player.rect.bottom - 20
-            else:
-                sx, sy = self.player.rect.centerx + (dir_x * 40), self.player.rect.centery - 5
+        # Cadência de tiro (auto-fire)
+        if self.shoot_pressed and (now - self.last_shot_time) < config.PLAYER_FIRE_INTERVAL_MS:
+            return
 
-            self.projectiles.append(
-                Projectile(sx, sy, dir_x, dir_y, max_range=self.bg_width, color=(100, 200, 255))
-            )
+        # 1) Primeiro tenta melee (faca)
+        if self.try_melee_attack():
             self.shoot_pressed = True
+            self.last_shot_time = now
+            return
 
-    def run_game_loop(self):
-        while self.state == "playing":
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    self.sound.stop_music()
-                    pygame.quit()
-                    sys.exit()
-                cheat_consumed = self.process_cheat_key(event)
-                if event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_ESCAPE:
-                        self.reset_all_state()
-                        self.state = "menu"
-                        return
-                    if event.key == pygame.K_p and not cheat_consumed:
-                        self.game_state.toggle_pause()
-                elif event.type == self.game_state.timer_event:
-                    if not self.infinite_time:
-                        self.game_state.update_time()
+        # 2) Direção "desejada" com base nas teclas (discreta)
+        raw_dx, raw_dy = get_shoot_direction(
+            keys,
+            facing=self.player.facing,
+            allow_diagonals=True,
+        )
 
-            if self.game_state.time_left <= 0 and not self.infinite_time:
-                self.handle_game_over()
-                return
+        target_vec = Vector2(raw_dx, raw_dy)
+        if target_vec.length_squared() == 0:
+            if self.aim_dir.length_squared() == 0:
+                target_vec = Vector2(1, 0)
+            else:
+                target_vec = self.aim_dir
+        target_vec = target_vec.normalize()
 
-            if self.flash_frames > 0:
-                self.screen.fill(self.flash_color or (255, 255, 255))
-                pygame.display.flip()
-                self.flash_frames -= 1
-                self.clock.tick(FPS)
-                continue
+        # Suavizar a mira em direção ao target
+        if self.aim_dir.length_squared() == 0:
+            self.aim_dir = target_vec
+        else:
+            self.aim_dir = self.aim_dir.lerp(
+                target_vec,
+                config.PLAYER_AIM_LERP_FACTOR,
+            )
+            if self.aim_dir.length_squared() == 0:
+                self.aim_dir = target_vec
 
-            if self.game_state.paused:
-                self.draw_scene()
-                pause_text = self.font.render("PAUSADO", True, (255, 255, 255))
-                self.screen.blit(pause_text, (WIDTH // 2 - 60, HEIGHT // 2 - 20))
-                pygame.display.flip()
-                self.clock.tick(FPS)
-                continue
+        aim = self.aim_dir.normalize()
 
-            keys = pygame.key.get_pressed()
-            if self.player:
-                self.player.handle_input(keys)
+        # 3) Calcular posição de spawn (usa direcção discreta para offsets)
+        cx = self.player.rect.centerx
+        cy = self.player.rect.centery
 
-                dt = self.clock.get_time()
-                self.player.update_animation(dt)
+        if raw_dx == 0 and raw_dy == -1:
+            # tiro puro para cima
+            sx, sy = cx, self.player.rect.top
+        elif raw_dx == 0 and raw_dy == 1:
+            # tiro puro para baixo
+            sx, sy = cx, cy
+        else:
+            # horizontal ou diagonal
+            sx = cx + raw_dx * config.PLAYER_PROJECTILE_OFFSET_X
+            sy = cy - config.PLAYER_PROJECTILE_OFFSET_Y
 
-                self.player.apply_gravity()
-                self.handle_player_shoot()
+        # 4) Criar projéctil com direção de mira suavizada (aim.x, aim.y)
+        self.projectiles.append(
+            Projectile(
+                sx,
+                sy,
+                aim.x,
+                aim.y,
+                max_range=self.bg_width,
+                color=config.PLAYER_PROJECTILE_COLOR,
+            )
+        )
 
-            if self.enemy_manager:
-                self.enemy_manager.update()
-                self.enemies = self.enemy_manager.get_enemies()
-                new_enemy_projectiles = self.enemy_manager.get_projectiles()
-                self.enemy_projectiles.extend(new_enemy_projectiles)
+        self.shoot_pressed = True
+        self.last_shot_time = now
 
-            for proj in self.projectiles + self.enemy_projectiles:
-                if proj:
-                    proj.update()
-
-            self.handle_collisions()
-            if self.state != "playing":
-                return
-
-            for text in self.floating_texts:
-                text.update()
-            self.floating_texts = [t for t in self.floating_texts if t.lifetime > 0]
-
-            if self.player:
-                self.POV = self.player.rect.centerx - WIDTH // 2
-                self.POV = max(0, min(self.POV, self.bg_width - WIDTH))
-
-            self.draw_scene()
-            self.draw_hud()
-            pygame.display.flip()
-            self.clock.tick(FPS)
-
+    # -----------------------------
+    # DRAW HELPERS
+    # -----------------------------
     def draw_scene(self):
+        """Desenha cenário, inimigos, jogador, projécteis e textos flutuantes."""
         self.screen.fill((0, 0, 0))
-        self.screen.blit(self.background, (-self.POV, 0))
+        if self.background:
+            self.screen.blit(self.background, (-self.POV, 0))
 
         if self.enemy_manager:
             self.enemy_manager.draw(self.screen, self.POV)
 
         if self.player:
-            # Agora deixamos o Player tratar do flip internamente via self.facing/update_sprite()
-            self.screen.blit(self.player.image, (self.player.rect.x - self.POV, self.player.rect.y))
+            self.screen.blit(
+                self.player.image,
+                (self.player.rect.x - self.POV, self.player.rect.y),
+            )
 
         for proj in self.projectiles + self.enemy_projectiles:
             if proj:
@@ -450,25 +598,189 @@ class Game:
             text.draw(self.screen, self.POV)
 
     def draw_hud(self):
-        tempo_str = "∞" if self.infinite_time else f"{self.game_state.time_left}s"
-        top_text = f"Pontuação: {self.game_state.score}   Tempo: {tempo_str}"
-        draw_text_with_outline(self.screen, top_text, self.font, 20, 10, (255, 255, 255))
-        if self.player:
-            hp_ratio = self.player.hp / self.player.max_hp
-            bar_width, bar_height = 200, 20
-            x, y = 20, 40
-            color = (0, 255, 0) if hp_ratio > 0.6 else (255, 255, 0) if hp_ratio > 0.3 else (255, 0, 0)
-            pygame.draw.rect(self.screen, (80, 80, 80), (x - 2, y - 2, bar_width + 4, bar_height + 4))
-            pygame.draw.rect(self.screen, color, (x, y, bar_width * hp_ratio, bar_height))
+        """Desenha HUD: pontuação, tempo, dificuldade, barra de HP."""
+        if not self.game_state:
+            return
 
+        tempo_str = "∞" if self.infinite_time else f"{self.game_state.time_left}s"
+        # Pontuação vem do ScoreManager (mantido em sync com o GameState)
+        score_value = self.score_manager.current_score if self.score_manager else 0
+        top_text = (
+            f"Pontuação: {score_value}   "
+            f"Tempo: {tempo_str}   "
+            f"Dif: {self.difficulty}"
+        )
+        draw_text_with_outline(
+            self.screen,
+            top_text,
+            self.font,
+            20,
+            10,
+            config.HUD_TEXT_COLOR,
+        )
+
+        if self.player:
+            hp_ratio = (
+                self.player.hp / self.player.max_hp
+                if self.player.max_hp > 0
+                else 0
+            )
+            bar_width = config.HUD_PLAYER_HP_BAR_WIDTH
+            bar_height = config.HUD_PLAYER_HP_BAR_HEIGHT
+            x, y = config.HUD_PLAYER_HP_BAR_POS
+
+            if hp_ratio > config.HUD_PLAYER_HP_GREEN_THRESHOLD:
+                color = config.HUD_PLAYER_HP_COLOR_GREEN
+            elif hp_ratio > config.HUD_PLAYER_HP_YELLOW_THRESHOLD:
+                color = config.HUD_PLAYER_HP_COLOR_YELLOW
+            else:
+                color = config.HUD_PLAYER_HP_COLOR_RED
+
+            pg.draw_rect(
+                self.screen,
+                config.HUD_PLAYER_HP_BG_COLOR,
+                (x - 2, y - 2, bar_width + 4, bar_height + 4),
+            )
+            pg.draw_rect(
+                self.screen,
+                color,
+                (x, y, bar_width * hp_ratio, bar_height),
+            )
+
+    # -----------------------------
+    # LOOP GLOBAL
+    # -----------------------------
     def run(self):
+        """Loop global de jogo: delega tudo na cena actual."""
         while self.running:
-            if self.state == "menu":
-                self.menu.run()
-            elif self.state == "playing":
-                self.run_game_loop()
+            events = pg.get_events()
+            dt = self.clock.get_time()
+
+            if not self.current_scene:
+                # Se por algum motivo ficarmos sem cena activa, volta ao menu
+                self.change_scene(MenuScene(self))
+
+            self.current_scene.handle_input(events)
+            self.current_scene.update(dt)
+            self.current_scene.draw(self.screen)
+
+            pg.display_flip()
+            self.clock.tick(config.FPS)
+
+
+# -----------------------------
+# CENA DE JOGO (LEVEL)
+# -----------------------------
+class LevelScene(Scene):
+    """
+    Cena que trata do jogo em si (nível actual).
+
+    A lógica pesada que antes estava em Game.run_game_loop
+    vive agora aqui: input, update, draw por frame.
+    """
+
+    def handle_input(self, events: list):
+        game = self.game
+        menu_key = controls.get_key(controls.MENU)
+        pause_key = controls.get_key(controls.PAUSE)
+
+        for event in events:
+            if event.type == pg.QUIT:
+                game.sound.stop_music()
+                pg.quit()
+                sys.exit()
+
+            cheat_consumed = game.process_cheats(event)
+
+            if event.type == pg.KEYDOWN:
+                if event.key == menu_key:
+                    # Rage quit para o menu: mata jogo actual
+                    game.reset_all_state()
+                    game.change_scene(MenuScene(game))
+                    return
+
+                if (
+                    event.key == pause_key
+                    and not cheat_consumed
+                    and game.game_state
+                ):
+                    game.game_state.toggle_pause()
+
+            # Timer do relógio
+            if game.game_state and event.type == game.game_state.timer_event:
+                if not game.infinite_time:
+                    game.game_state.update_time()
+
+    def update(self, dt: float):
+        game = self.game
+
+        # Timeout de nível
+        if (
+            game.game_state
+            and game.game_state.time_left <= 0
+            and not game.infinite_time
+        ):
+            game.handle_game_over()
+            return
+
+        # Flash de cheat / FX: enquanto dura, não há lógica de jogo
+        if game.flash_frames > 0:
+            game.flash_frames -= 1
+            return
+
+        # Pausa: não actualizamos física nem nada
+        if game.game_state and game.game_state.paused:
+            return
+
+        # --- UPDATE JOGADOR ---
+        keys = pg.get_keys()
+        if game.player:
+            game.player.handle_input(keys)
+            game.player.update_animation(dt)
+            game.player.apply_gravity()
+            game.handle_player_shoot()
+
+        # --- UPDATE INIMIGOS ---
+        if game.enemy_manager:
+            game.enemy_manager.update()
+            game.enemies = game.enemy_manager.get_enemies()
+            new_enemy_projectiles = game.enemy_manager.get_projectiles()
+            game.enemy_projectiles.extend(new_enemy_projectiles)
+
+        # --- UPDATE PROJÉCTEIS ---
+        for proj in game.projectiles + game.enemy_projectiles:
+            if proj:
+                proj.update()
+
+        # --- COLISÕES ---
+        game.handle_collisions()
+
+        # Se o Game Over trocou de cena, não continuamos
+        if not isinstance(game.current_scene, LevelScene):
+            return
+
+        # --- FLOATING TEXTS ---
+        for text in game.floating_texts:
+            text.update()
+        game.floating_texts = [t for t in game.floating_texts if t.lifetime > 0]
+
+        # --- CÂMARA / POV ---
+        if game.player:
+            game.POV = game.player.rect.centerx - config.WIDTH // 2
+            game.POV = max(0, min(game.POV, game.bg_width - config.WIDTH))
+
+    def draw(self, screen: pg.Surface):
+        game = self.game
+
+        # Flash de cheat tem prioridade visual
+        if game.flash_frames > 0 and game.flash_color is not None:
+            screen.fill(game.flash_color)
+            return
+
+        # Cena normal
+        game.draw_scene()
+        game.draw_hud()
 
 
 if __name__ == "__main__":
-    print("[DEBUG MAIN] Welcome to my Metal Slug 2D...")
     Game().run()

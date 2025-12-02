@@ -1,62 +1,97 @@
-import pygame
+# entity/projectile.py
+"""
+Projéctil genérico.
+"""
 
-PROJECTILE_SPEED = 12
+import pg_engine as pg
+import config
 
 
 class Projectile:
-    def __init__(self, x, y, dir_x, dir_y, max_range=2000, color=None, damage=10):
-        self.rect = pygame.Rect(x, y, 10, 10)
-        self.start_x = x
-        self.start_y = y
-        self.dir_x = dir_x
-        self.dir_y = dir_y
-        self.speed = PROJECTILE_SPEED
-        self.alive = True
-        self.max_range = max_range
-        self.damage = damage
-        self.color = color or (255, 0, 0)
+    def __init__(
+        self,
+        x,
+        y,
+        dir_x,
+        dir_y,
+        speed=None,
+        max_range=None,
+        color=None,
+        damage: int = 10,
+    ):
+        self.x = float(x)
+        self.y = float(y)
 
-        # efeito de impacto
+        self.rect = pg.Rect(int(self.x), int(self.y), 10, 10)
+
+        self.start_x = self.x
+        self.start_y = self.y
+
+        length_sq = dir_x * dir_x + dir_y * dir_y
+        if length_sq == 0:
+            self.dir_x = 1.0
+            self.dir_y = 0.0
+        else:
+            length = length_sq ** 0.5
+            self.dir_x = dir_x / length
+            self.dir_y = dir_y / length
+
+        self.speed = speed if speed is not None else config.PLAYER_PROJECTILE_SPEED
+        self.max_range = max_range if max_range is not None else config.PLAYER_PROJECTILE_MAX_RANGE
+
+        self.alive = True
+        self.damage = damage
+
+        self.color = color or config.PLAYER_PROJECTILE_COLOR
+
         self.hit_flash = 0
         self.flash_color = (255, 255, 200)
 
     def update(self):
-        if not self.alive:            
+        if self.alive:
+            self.x += self.dir_x * self.speed
+            self.y += self.dir_y * self.speed
+
+            self.rect.centerx = int(self.x)
+            self.rect.centery = int(self.y)
+
+            distance = abs(self.x - self.start_x) + abs(self.y - self.start_y)
+            if distance > self.max_range:
+                self.alive = False
+                self.hit_flash = 0
+        else:
             if self.hit_flash > 0:
                 self.hit_flash -= 1
-            return
-
-        self.rect.x += self.dir_x * self.speed
-        self.rect.y += self.dir_y * self.speed
-
-        distance = abs(self.rect.x - self.start_x) + abs(self.rect.y - self.start_y)
-        if distance > self.max_range:
-            self.alive = False
-            self.hit_flash = 0
 
     def draw(self, screen, camera_x):
         if not self.alive:
             if self.hit_flash > 0:
                 radius = 6 + (2 - self.hit_flash) * 2
-                pygame.draw.circle(
+                pg.draw_circle(
                     screen,
                     self.flash_color,
                     (self.rect.centerx - camera_x, self.rect.centery),
                     radius,
                 )
-                self.hit_flash -= 1
             return
 
-        # Projécteis, Bola -> eu // Quadrado -> outros
-        if self.color == (100, 200, 255):
-            pygame.draw.circle(
-                screen, self.color, (self.rect.centerx - camera_x, self.rect.centery), 5
-            )
-        else:
-            pygame.draw.rect(
+        if self.color == config.PLAYER_PROJECTILE_COLOR:
+            pg.draw_circle(
                 screen,
                 self.color,
-                (self.rect.x - camera_x, self.rect.y, self.rect.width, self.rect.height),
+                (self.rect.centerx - camera_x, self.rect.centery),
+                5,
+            )
+        else:
+            pg.draw_rect(
+                screen,
+                self.color,
+                pg.Rect(
+                    self.rect.x - camera_x,
+                    self.rect.y,
+                    self.rect.width,
+                    self.rect.height,
+                ),
             )
 
     def trigger_hit(self):
