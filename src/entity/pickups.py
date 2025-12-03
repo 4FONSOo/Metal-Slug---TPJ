@@ -1,398 +1,362 @@
-# pickups.py
+# entity/pickups.py
 """
-Sistema de pickups (power-ups / power-downs).
+Definição de pickups (power-ups) e lógica básica:
 
-Arquitectura:
-  - Nada de pygame aqui dentro.
-  - Só lógica: posição, tipo, lifetime, movimento (paraquedas) e descrição do efeito.
-  - O Game/LevelScene trata de:
-      * spawn aleatório (usa helpers deste ficheiro)
-      * colidir player <-> pickup
-      * aplicar o efeito ao player / inimigos / HUD
-      * desenhar (quadrados agora, sprites depois)
-      * tocar sons (ex: NUKE PIIIIII)
-
-Tipos de pickups:
-  1) WEAPON_UPGRADE  – upgrade temporário de arma (50 munições, fire-rate mais rápido)
-  2) GRENADE_RELOAD  – carrega granadas
-  3) HP_UP           – cura HP
-  4) HP_DOWN         – dano ao jogador (trollzinho)
-  5) NUKE            – rebenta com tudo, flash no ecrã, slow-mo, som "PIIIII"
-
-Cada pickup tem:
-  - (x, y): posição no mundo (canto superior esquerdo)
-  - largura/altura (para colisão e desenho)
-  - tempo de vida (em segundos)
-  - tipo (kind)
-  - dados do efeito (via get_effect())
-  - movimento estilo “paraquedas”: queda lenta, opcionalmente com balanço lateral.
+- Tipos de pickup (PickupKind)
+- Classe Pickup (posição, movimento, lifetime, etc.)
+- Função spawn_random_pickup:
+    escolhe tipo com base em probabilidades (config)
+    e cria um Pickup já pronto a cair no nível.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Any, Tuple, Optional, Iterable
 import random
-import math
+
+import config
 
 
 # -----------------------------
-# CONSTANTES (podes mover para config.py se quiseres)
+# Geometria / movimento / cores
+# (ficam aqui porque mais tarde vais trocar por sprites)
 # -----------------------------
 
-# Dimensão default do pickup (quadrado)
-PICKUP_WIDTH = 24
-PICKUP_HEIGHT = 24
+PICKUP_WIDTH = 64
+PICKUP_HEIGHT = 64
+PICKUP_FALL_SPEED = 120.0       # píxeis por segundo a cair
+PICKUP_SPAWN_MARGIN_X = 32      # margem lateral para não cair mesmo na borda
+PICKUP_SPAWN_Y_OFFSET = 40      # quanto acima do topo do ecrã começa a cair
 
-# Quanto tempo fica no mundo até desaparecer (segundos)
-PICKUP_LIFETIME_SECONDS = 10.0
-
-# Movimento "paraquedas"
-PICKUP_PARACHUTE_FALL_SPEED = 80.0          # pixels/seg – queda lenta
-PICKUP_PARACHUTE_SWAY_AMPLITUDE = 10.0      # quanto balança para os lados
-PICKUP_PARACHUTE_SWAY_SPEED = 2.0           # velocidade do balanço
-
-# Efeitos base (ajusta à vontade)
-WEAPON_UPGRADE_AMMO = 50
-WEAPON_UPGRADE_FIRE_RATE_MULTIPLIER = 0.5   # 0.5 = duas vezes mais rápido
-
-GRENADE_RELOAD_AMOUNT = 3
-
-HP_UP_AMOUNT = 200
-HP_DOWN_AMOUNT = 200
-
-# NUKE – estes valores são apenas "contrato" para o Game usar
-NUKE_FLASH_DURATION = 0.6        # segundos de flash forte
-NUKE_FLASH_FADE_DURATION = 1.0   # segundos a voltar ao normal
-NUKE_SLOWMO_DURATION = 0.8       # duração de "slow motion" depois
-NUKE_SCREEN_FLASH_COLOR = (255, 255, 255)  # branco nuclear
-NUKE_SOUND_ID = "sfx_nuke_beep"  # placeholder para som "PIIIII" no sistema de áudio
+PICKUP_COLOR_DEFAULT = (255, 255, 0)
+PICKUP_COLOR_HP_UP = (0, 220, 0)
+PICKUP_COLOR_HP_DOWN = (220, 0, 0)
+PICKUP_COLOR_GRENADES = (0, 180, 255)
+PICKUP_COLOR_WEAPON_UP = (255, 165, 0)
+PICKUP_COLOR_NUKE = (255, 255, 255)
 
 
-class PickupKind(str, Enum):
-    """Tipos de pickup suportados."""
-
-    WEAPON_UPGRADE = "weapon_upgrade"
-    GRENADE_RELOAD = "grenade_reload"
+class PickupKind(Enum):
     HP_UP = "hp_up"
     HP_DOWN = "hp_down"
+    GRENADES = "grenades"
+    WEAPON_UP = "weapon_up"
     NUKE = "nuke"
 
 
+def _get_color_for_kind(kind: PickupKind) -> Tuple[int, int, int]:
+    """Cor base para cada tipo de pickup (rect simples)."""
+    if kind == PickupKind.HP_UP:
+        return PICKUP_COLOR_HP_UP
+    if kind == PickupKind.HP_DOWN:
+        return PICKUP_COLOR_HP_DOWN
+    if kind == PickupKind.GRENADES:
+        return PICKUP_COLOR_GRENADES
+    if kind == PickupKind.WEAPON_UP:
+        return PICKUP_COLOR_WEAPON_UP
+    if kind == PickupKind.NUKE:
+        return PICKUP_COLOR_NUKE
+    return PICKUP_COLOR_DEFAULT
+
+
+@dataclass
 class Pickup:
     """
-    Instância de um pickup no mundo.
+    Representa um pickup individual no mundo.
 
-    Não sabe nada de Player, Game, pygame, etc.
-    Só:
-      - onde está
-      - que tipo é
-      - quanto tempo dura
-      - se ainda está a cair estilo paraquedas
-      - que efeito descreve
+    Campos principais:
+      - kind: tipo lógico (HP_UP, GRENADES, etc.)
+      - x, y: posição (canto superior esquerdo)
+      - lifetime: tempo de vida restante (segundos)
+      - falling: se ainda está a cair ou já pousou
+      - ground_y: y do "chão" onde deve pousar (se None, cai para sempre)
     """
 
-    def __init__(
-        self,
-        kind: PickupKind,
-        x: float,
-        y: float,
-        lifetime: float = PICKUP_LIFETIME_SECONDS,
-        width: int = PICKUP_WIDTH,
-        height: int = PICKUP_HEIGHT,
-        *,
-        falling: bool = True,
-        fall_speed: float = PICKUP_PARACHUTE_FALL_SPEED,
-        ground_y: Optional[float] = None,
-    ):
-        if not isinstance(kind, PickupKind):
-            raise TypeError(f"[Pickup] kind inválido: {kind!r}")
+    kind: PickupKind
+    x: float
+    y: float
+    lifetime: float
+    falling: bool = True
+    ground_y: Optional[float] = None
 
-        self.kind = kind
+    # Internos / defaults geométricos
+    vy: float = PICKUP_FALL_SPEED
+    width: float = PICKUP_WIDTH
+    height: float = PICKUP_HEIGHT
+    alive: bool = True
+    collected: bool = False
 
-        # posição base
-        self.x = float(x)
-        self.y = float(y)
-        self.width = int(width)
-        self.height = int(height)
-
-        # tempo de vida em segundos
-        self.time_left = float(lifetime)
-        self.alive = True
-
-        # movimento estilo paraquedas
-        self.falling = bool(falling)
-        self.fall_speed = float(fall_speed)
-        self.ground_y: Optional[float] = ground_y
-
-        # para balanço lateral (paraquedas a abanar)
-        self._float_phase = 0.0
-        self._base_x = float(x)
-
-    # ------------------------------------------------------------------ #
-    # Configuração de chão / limite vertical
-    # ------------------------------------------------------------------ #
-
-    def set_ground_y(self, ground_y: float) -> None:
-        """
-        Define a linha de "chão" onde o pickup pára de cair.
-
-        Exemplo de uso no Game:
-          p = Pickup(...)
-          p.set_ground_y(ground_y_do_nível_ou_da_plataforma)
-        """
-        self.ground_y = float(ground_y)
-
-    # ------------------------------------------------------------------ #
-    # Atualização
-    # ------------------------------------------------------------------ #
-
+    # -----------------------------
+    # LÓGICA
+    # -----------------------------
     def update(self, dt: float) -> None:
         """
-        Atualiza o estado do pickup.
+        Actualiza posição e lifetime.
 
-        dt: delta time em segundos (ex: 0.016 / 60 FPS)
-
-        - Desconta lifetime.
-        - Se estiver a cair, move para baixo e abana para os lados.
-        - Quando atinge o ground_y (se definido), pára de cair.
+        dt em segundos (não milissegundos).
         """
         if not self.alive:
             return
 
         # Lifetime
-        self.time_left -= dt
-        if self.time_left <= 0:
-            self.time_left = 0
+        self.lifetime -= dt
+        if self.lifetime <= 0.0:
             self.alive = False
             return
 
-        # Animação de "flutuação" para o paraquedas
-        self._float_phase += dt
-
+        # Queda simples em direcção ao ground_y (se existir)
         if self.falling:
-            # queda lenta
-            self.y += self.fall_speed * dt
-
-            # balanço lateral tipo paraquedas
-            sway = PICKUP_PARACHUTE_SWAY_AMPLITUDE * math.sin(
-                self._float_phase * PICKUP_PARACHUTE_SWAY_SPEED
-            )
-            self.x = self._base_x + sway
-
-            # parar quando atinge o chão, se definido
             if self.ground_y is not None:
-                bottom = self.y + self.height
-                if bottom >= self.ground_y:
-                    # pousa suavemente no chão
+                new_y = self.y + self.vy * dt
+                if new_y + self.height >= self.ground_y:
+                    # pousou
                     self.y = self.ground_y - self.height
                     self.falling = False
-                    # actualiza base_x para o ponto onde ficou
-                    self._base_x = self.x
+                else:
+                    self.y = new_y
+            else:
+                # sem chão definido → cai para sempre
+                self.y += self.vy * dt
 
-    def is_expired(self) -> bool:
-        """True se já passou o tempo de vida (desapareceu)."""
-        return not self.alive
-
-    def is_falling(self) -> bool:
-        """True se ainda estiver a cair estilo paraquedas."""
-        return self.falling and self.alive
-
-    # ------------------------------------------------------------------ #
-    # Colisão / geometria
-    # ------------------------------------------------------------------ #
-
+    # -----------------------------
+    # COLISÃO / DRAW
+    # -----------------------------
     def get_rect_tuple(self) -> Tuple[int, int, int, int]:
-        """
-        Devolve (x, y, w, h) em ints, para o Game criar pg.Rect se quiser.
-        """
-        return int(self.x), int(self.y), self.width, self.height
+        """Rect em ints, para colisão com o player."""
+        return int(self.x), int(self.y), int(self.width), int(self.height)
 
-    # ------------------------------------------------------------------ #
-    # Efeito lógico
-    # ------------------------------------------------------------------ #
+    def get_draw_data(self) -> Dict[str, Any]:
+        """
+        Dados mínimos para desenho:
+          - x, y, width, height, color
+        Game.draw_scene trata do resto.
+        """
+        if not self.alive:
+            return {}
 
+        return {
+            "x": self.x,
+            "y": self.y,
+            "width": self.width,
+            "height": self.height,
+            "color": _get_color_for_kind(self.kind),
+            "kind": self.kind.value,  # <- NOVO: "hp_up", "grenades", etc.
+        }
+
+    # -----------------------------
+    # EFEITOS
+    # -----------------------------
     def get_effect(self) -> Dict[str, Any]:
         """
-        Descreve o efeito do pickup em forma de dicionário.
+        Dicionário com o efeito lógico do pickup.
 
-        O Game pode usar isto para aplicar:
-          - WEAPON_UPGRADE: mexer no fire_rate e munições, por tempo limitado
-          - GRENADE_RELOAD: somar granadas ao player
-          - HP_UP / HP_DOWN: ajustar HP
-          - NUKE: matar todos os inimigos, flash no ecrã, slow-mo, som, etc.
-
-        NÃO aplica nada por si – apenas diz "o que devia acontecer".
+        Compatível com Game.apply_pickup_effect:
+          - type: string identificadora
+          - hp / heal / hp_delta
+          - grenades_delta
+          - nuke: bool
         """
-        if self.kind == PickupKind.WEAPON_UPGRADE:
-            return {
-                "type": self.kind.value,
-                "ammo": WEAPON_UPGRADE_AMMO,
-                "fire_rate_multiplier": WEAPON_UPGRADE_FIRE_RATE_MULTIPLIER,
-                # Se quiseres, mais tarde podes adicionar:
-                # "duration": 5.0,  # segundos de duração do upgrade
-            }
-
-        if self.kind == PickupKind.GRENADE_RELOAD:
-            return {
-                "type": self.kind.value,
-                "grenades_delta": GRENADE_RELOAD_AMOUNT,
-            }
-
         if self.kind == PickupKind.HP_UP:
             return {
-                "type": self.kind.value,
-                "hp_delta": +HP_UP_AMOUNT,
+                "type": "hp_up",
+                "hp": config.HP_UP_AMOUNT,
+                "sfx": "pickup_hp_up",
             }
 
         if self.kind == PickupKind.HP_DOWN:
             return {
-                "type": self.kind.value,
-                "hp_delta": -HP_DOWN_AMOUNT,
+                "type": "hp_down",
+                "hp": -config.HP_DOWN_AMOUNT,
+                "sfx": "pickup_hp_down",
+            }
+
+        if self.kind == PickupKind.GRENADES:
+            return {
+                "type": "grenades",
+                "grenades_delta": config.GRENADE_RELOAD_AMOUNT,
+                "sfx": "pickup_grenade",
+            }
+
+        if self.kind == PickupKind.WEAPON_UP:
+            # Ainda não estás a usar ammo/fire_rate no Game,
+            # mas os campos já vão preparados.
+            return {
+                "type": "weapon_up",
+                "ammo": config.WEAPON_UPGRADE_AMMO,
+                "fire_rate_multiplier": config.WEAPON_UPGRADE_FIRE_RATE_MULTIPLIER,
+                "sfx": "pickup_weapon",
             }
 
         if self.kind == PickupKind.NUKE:
             return {
-                "type": self.kind.value,
-                "kill_all_enemies": True,
-                "screen_flash": True,
-                "flash_color": NUKE_SCREEN_FLASH_COLOR,
-                "flash_duration": NUKE_FLASH_DURATION,
-                "flash_fade_duration": NUKE_FLASH_FADE_DURATION,
-                "slow_motion": True,
-                "slow_motion_duration": NUKE_SLOWMO_DURATION,
-                # Hook para som tipo "PIIIII"
-                "sound_id": NUKE_SOUND_ID,
+                "type": "nuke",
+                "nuke": True,
+                "sfx": "pickup_nuke",
             }
 
         # fallback paranoico
-        return {"type": "unknown"}
-
-    # ------------------------------------------------------------------ #
-    # Dados para desenho (placeholder)
-    # ------------------------------------------------------------------ #
-
-    def get_draw_data(self) -> Dict[str, Any]:
-        """
-        Dados mínimos para o Game desenhar o pickup.
-
-        O Game pode fazer:
-          - olhar para "kind" e escolher cor/sprite
-          - usar (x, y, width, height) para rect ou colocar a sprite
-
-        Neste momento:
-          - apenas sugere cores diferentes por tipo
-          - não toca em pygame nem pg_engine
-        """
-        # Cores sugeridas (podes alterar à vontade no Game)
-        if self.kind == PickupKind.WEAPON_UPGRADE:
-            color = (0, 200, 255)      # azul ciano
-        elif self.kind == PickupKind.GRENADE_RELOAD:
-            color = (0, 255, 0)        # verde
-        elif self.kind == PickupKind.HP_UP:
-            color = (0, 255, 100)      # verde clarinho
-        elif self.kind == PickupKind.HP_DOWN:
-            color = (255, 80, 80)      # vermelho forte
-        elif self.kind == PickupKind.NUKE:
-            color = (255, 255, 0)      # amarelo nuclear
-        else:
-            color = (255, 255, 255)    # branco, fallback
-
-        # Aqui, se quisermos sprites no futuro:
-        # sprite_id = "pickup_weapon" / "pickup_grenade" / "pickup_hp_up" / ...
-        # e o Game faria algo como: image = resource.load_sprite(sprite_id)
-        sprite_id = None  # placeholder; por enquanto desenhas só rects
-
         return {
-            "kind": self.kind.value,
-            "x": int(self.x),
-            "y": int(self.y),
-            "width": self.width,
-            "height": self.height,
-            "color": color,
-            "sprite_id": sprite_id,
-            "time_left": self.time_left,
+            "type": "unknown",
         }
 
-    # ------------------------------------------------------------------ #
-    # Helpers
-    # ------------------------------------------------------------------ #
-
     def mark_collected(self) -> None:
-        """
-        Marca explicitamente como apanhado.
-
-        O fluxo típico no Game será:
-          - se player.rect colide com pickup -> ler efeito -> aplicar -> mark_collected()
-        """
+        """Marca como apanhado pelo jogador (morre logicamente)."""
+        self.collected = True
         self.alive = False
-        self.time_left = 0.0
 
 
-# ---------------------------------------------------------------------- #
-# HELPERS PARA SPAWN ALEATÓRIO
-# ---------------------------------------------------------------------- #
+# -----------------------------
+# Helpers de escolha / plataformas
+# -----------------------------
 
-def random_pickup_kind(
+def _rect_to_tuple(rect_like) -> Tuple[int, int, int, int]:
+    """
+    Converte algo tipo pg.Rect ou (x, y, w, h) num tuple de ints.
+
+    Evita depender de pygame directamente.
+    """
+    if rect_like is None:
+        return 0, 0, 0, 0
+
+    for attr in ("x", "y", "width", "height"):
+        if not hasattr(rect_like, attr):
+            break
+    else:
+        return (
+            int(rect_like.x),
+            int(rect_like.y),
+            int(rect_like.width),
+            int(rect_like.height),
+        )
+
+    x, y, w, h = rect_like
+    return int(x), int(y), int(w), int(h)
+
+
+def _compute_ground_y_for_x(
+    x: float,
+    platforms: Iterable[object],
+    fallback_ground_y: Optional[float] = None,
+) -> Optional[float]:
+    """
+    Procura a plataforma mais "alta" (menor y) que cobre o X dado.
+
+    Se não encontrar nenhuma, usa fallback_ground_y.
+    """
+    best_y: Optional[int] = None
+    xi = int(x)
+
+    for plat in platforms:
+        px, py, pw, ph = _rect_to_tuple(plat)
+        if xi < px or xi > px + pw:
+            continue
+
+        # queremos a primeira plataforma que a caixa encontra ao cair:
+        # a de menor y (mais perto do topo do ecrã)
+        if best_y is None or py < best_y:
+            best_y = py
+
+    if best_y is not None:
+        return float(best_y)
+
+    return fallback_ground_y
+
+
+def _base_random_kind() -> PickupKind:
+    """
+    Escolhe um tipo de pickup com base nas probabilidades do config.
+    """
+    probs = [
+        (config.PICKUP_PROB_HP_UP, PickupKind.HP_UP),
+        (config.PICKUP_PROB_HP_DOWN, PickupKind.HP_DOWN),
+        (config.PICKUP_PROB_GRENADES, PickupKind.GRENADES),
+        (config.PICKUP_PROB_WEAPON_UP, PickupKind.WEAPON_UP),
+        (config.PICKUP_PROB_NUKE, PickupKind.NUKE),
+    ]
+
+    total = sum(p for p, _ in probs)
+    if total <= 0:
+        # fallback: distribuição uniforme
+        return random.choice([k for _, k in probs])
+
+    r = random.uniform(0, total)
+    acc = 0.0
+    for prob, kind in probs:
+        acc += prob
+        if r <= acc:
+            return kind
+
+    return probs[-1][1]
+
+
+def _choose_random_kind(
     include: Optional[Iterable[PickupKind]] = None,
     exclude: Optional[Iterable[PickupKind]] = None,
 ) -> PickupKind:
     """
-    Escolhe um tipo de pickup aleatoriamente.
-
-    include: se fornecido, só escolhe dentro deste conjunto.
-    exclude: tipos a evitar.
-
-    Exemplo:
-      random_pickup_kind(exclude=[PickupKind.HP_DOWN])
+    Escolhe tipo baseando-se na distribuição, respeitando include/exclude se dados.
     """
-    if include is not None:
-        pool = list(include)
-    else:
-        pool = list(PickupKind)
+    include_set = set(include) if include is not None else None
+    exclude_set = set(exclude) if exclude is not None else None
 
-    if exclude:
-        excluded = set(exclude)
-        pool = [k for k in pool if k not in excluded]
+    def allowed(k: PickupKind) -> bool:
+        if include_set is not None and k not in include_set:
+            return False
+        if exclude_set is not None and k in exclude_set:
+            return False
+        return True
 
-    if not pool:
-        # fallback: pelo menos um tipo
-        pool = [PickupKind.WEAPON_UPGRADE]
+    kind = _base_random_kind()
+    if allowed(kind):
+        return kind
 
-    return random.choice(pool)
+    candidates = [k for k in PickupKind if allowed(k)]
+    if candidates:
+        return random.choice(candidates)
 
+    return kind
+
+
+# -----------------------------
+# FACTORY: spawn_random_pickup
+# -----------------------------
 
 def spawn_random_pickup(
     level_width: int,
-    ground_y: Optional[float] = None,
     *,
-    spawn_y: float = -40.0,
-    lifetime: float = PICKUP_LIFETIME_SECONDS,
+    ground_y: Optional[float] = None,
     include: Optional[Iterable[PickupKind]] = None,
     exclude: Optional[Iterable[PickupKind]] = None,
+    platforms: Optional[Iterable[object]] = None,
 ) -> Pickup:
     """
-    Cria um pickup aleatório, a cair de paraquedas no nível.
+    Cria um pickup aleatório, a cair de paraquedas.
 
-    - level_width: largura total do nível (para escolher o X aleatório).
-    - ground_y: linha vertical onde o pickup deve pousar (ex: altura do chão).
-    - spawn_y: altura inicial (default: -40, ligeiramente acima do topo do ecrã).
-    - lifetime: tempo de vida em segundos.
-
-    Exemplo de uso no Game:
-      p = spawn_random_pickup(self.bg_width, ground_y=self.ground_y)
-      self.pickups.append(p)
+    level_width: largura total do nível (para escolher X aleatório).
+    ground_y: fallback de chão global (usado se não houver plataforma nesse X).
+    platforms: lista de plataformas (pg.Rect ou tuples) para pousar em cima.
+    include/exclude: filtros opcionais de tipos.
     """
-    kind = random_pickup_kind(include=include, exclude=exclude)
-    x = random.randint(0, max(0, level_width - PICKUP_WIDTH))
+    kind = _choose_random_kind(include=include, exclude=exclude)
 
-    pickup = Pickup(
+    margin = PICKUP_SPAWN_MARGIN_X
+    lw = max(2 * margin + 1, int(level_width))
+    x = random.randint(margin, lw - margin)
+
+    if platforms is not None:
+        gy = _compute_ground_y_for_x(x, platforms, fallback_ground_y=ground_y)
+    else:
+        gy = ground_y
+
+    y = -PICKUP_SPAWN_Y_OFFSET  # começa um pouco acima do topo
+
+    return Pickup(
         kind=kind,
-        x=x,
-        y=spawn_y,
-        lifetime=lifetime,
+        x=float(x),
+        y=float(y),
+        lifetime=config.PICKUP_LIFETIME_SECONDS,
         falling=True,
-        fall_speed=PICKUP_PARACHUTE_FALL_SPEED,
-        ground_y=ground_y,
+        ground_y=gy,
     )
-    return pickup

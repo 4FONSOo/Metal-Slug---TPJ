@@ -10,6 +10,7 @@ por 20 sítios diferentes.
 import os
 import pg_engine as pg
 from config import ASSETS_DIR
+from entity.pickups import PickupKind, PICKUP_WIDTH, PICKUP_HEIGHT
 
 
 def find_asset(filename: str) -> str:
@@ -117,3 +118,41 @@ def load_sound_path(filename: str) -> str:
         raise FileNotFoundError(f"[resource] Som não encontrado: {path}")
 
     return os.path.abspath(path)
+
+def load_pickup_sprite(filename: str):
+    """
+    Carrega uma sprite de pickup a partir de ASSETS_DIR/misc/<filename>.
+    """
+    misc_dir = os.path.join(ASSETS_DIR, "misc")
+    path = os.path.join(misc_dir, filename)
+
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"[resource] Pickup '{filename}' não encontrado em {misc_dir}")
+
+    return pg.load_image(path)
+
+
+def load_pickup_sprites() -> dict[PickupKind, pg.Surface]:
+    """
+    Carrega todas as sprites de pickups conhecidas e devolve um dicionário:
+
+        { PickupKind.HP_UP: <Surface>, ... }
+
+    Se alguma falhar, lança FileNotFoundError.
+    """
+    mapping = {
+        PickupKind.HP_UP: "health.png",
+        PickupKind.HP_DOWN: "Damage.png",
+        PickupKind.GRENADES: "Granades.png",
+        PickupKind.NUKE: "Nuke.png",
+        PickupKind.WEAPON_UP: "Upgrade.png",
+    }
+
+    sprites: dict[PickupKind, pg.Surface] = {}
+
+    for kind, filename in mapping.items():
+        img = load_pickup_sprite(filename)
+        img = pg.scale_image(img, (PICKUP_WIDTH, PICKUP_HEIGHT))
+        sprites[kind] = img
+
+    return sprites

@@ -1,8 +1,3 @@
-"""
-Config geral do jogo.
-Se isto estiver todo lixado, o resto vem por arrasto.
-"""
-
 import os
 import pg_engine as pg
 
@@ -167,6 +162,45 @@ MENU_OPTIONS_FONT_SIZE = 30
 
 MENU_VOLUME_HOLD_REPEAT_FRAMES = 3
 MENU_VOLUME_STEP = 1
+
+# -----------------------------
+# PICKUPS / POWER-UPS
+# -----------------------------
+
+# Frequência de spawn automático (segundos)
+PICKUP_AUTO_SPAWN_INTERVAL_MIN = 0.5
+PICKUP_AUTO_SPAWN_INTERVAL_MAX = 1
+
+# Número máximo de pickups activos em simultâneo
+PICKUP_MAX_ACTIVE = 5
+
+# Tempo de vida de cada pickup (em segundos)
+PICKUP_LIFETIME_SECONDS = 10.0
+
+# Probabilidades (%). Devem somar 100.
+# 30% Vida Up
+PICKUP_PROB_HP_UP = 30
+# 30% Vida Down
+PICKUP_PROB_HP_DOWN = 30
+# 20% Granadas
+PICKUP_PROB_GRENADES = 20
+# 15% Upgrade de rifle
+PICKUP_PROB_WEAPON_UP = 15
+# 5% Nuke
+PICKUP_PROB_NUKE = 5
+
+# Efeitos numéricos dos pickups
+
+# Upgrade de arma
+WEAPON_UPGRADE_AMMO = 50
+WEAPON_UPGRADE_FIRE_RATE_MULTIPLIER = 0.5   # 0.5 = duas vezes mais rápido
+
+# Granadas
+GRENADE_RELOAD_AMOUNT = 3
+
+# Vida
+HP_UP_AMOUNT = 500
+HP_DOWN_AMOUNT = 200
 
 # -----------------------------
 # CHEATS

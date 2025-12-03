@@ -17,8 +17,8 @@ import controls
 
 from scene import Scene
 from cheats import CheatEngine
-from input_manager import is_fire_pressed, get_shoot_direction, is_granade_pressed
-
+from managers.input_manager import is_fire_pressed, get_shoot_direction, is_granade_pressed
+from managers.pickup_manager import PickupManager, PickupEffectEvent
 
 from entity.player import Player
 from entity.enemy import EnemyManager
@@ -29,6 +29,8 @@ from config import DIFFICULTY_PRESETS, DEFAULT_DIFFICULTY, CHEAT_CODES
 from pg_engine import Vector2
 from score import ScoreManager, EnterNameScene, HighScoreScene
 from entity.granade import Granade  # lógica da granada
+from resource import load_pickup_sprites
+
 
 # Import no fim do ficheiro para evitar circular? Não, aqui é seguro:
 from scenes.menu import Menu as MenuScene  # cena de menu principal
@@ -120,6 +122,13 @@ class Game:
         self.font = pg.create_font(config.HUD_FONT_NAME, config.HUD_FONT_SIZE)
         self.sound = SoundManager()
 
+        # Sprites dos pickups (health, granadas, etc.)
+        try:
+            self.pickup_sprites = load_pickup_sprites()
+        except Exception as e:
+            print(f"[WARN] Falha a carregar sprites de pickups: {e}")
+            self.pickup_sprites = {}
+
         # Sistema de scores (pontuação actual + highscores)
         self.score_manager = ScoreManager()
 
@@ -142,6 +151,9 @@ class Game:
         self.enemy_projectiles: list[Projectile] = []    # projécteis dos inimigos
         self.granades: list[Granade] = []                # granadas do jogador
         self.floating_texts: list[FloatingText] = []
+
+        # Pickups / power-ups
+        self.pickup_manager: PickupManager | None = None
 
         # Disparo / mira
         self.shoot_pressed = False
@@ -270,7 +282,6 @@ class Game:
 
         return consumed
 
-
     def reset_all_state(self):
         """Reset total: cheats, estado lógico, entidades e música."""
         self.cheat_engine.reset_all()
@@ -293,6 +304,9 @@ class Game:
         self.enemy_projectiles.clear()
         self.granades.clear()
         self.floating_texts.clear()
+        if self.pickup_manager:
+            self.pickup_manager.clear()
+        self.pickup_manager = None
         self.shoot_pressed = False
         self.granade_pressed = False
         try:
@@ -351,6 +365,23 @@ class Game:
         self.background = self.level["background"]
         self.bg_width = self.level["bg_width"]
         self.platforms = self.level["platforms"]
+
+ # Gestor de pickups (power-ups)
+        ground_y = None
+        if self.platforms:
+            # tentativa razoável: usar a plataforma mais baixa como fallback de "chão global"
+            try:
+                ground_y = max(p.top for p in self.platforms)
+            except AttributeError:
+                # caso as plataformas sejam tuples (x, y, w, h)
+                ground_y = max(p[1] for p in self.platforms)
+
+        self.pickup_manager = PickupManager(
+            level_width=self.bg_width,
+            ground_y=ground_y,
+            platforms=self.platforms,   # <- NOVO: passa as plataformas
+            auto_spawn=True,
+        )
 
         self.sound.stop_music()
         self.sound.play_music("theme.mp3")
@@ -415,6 +446,91 @@ class Game:
         # Texto flutuante facultativo
         if x is not None and y is not None:
             self.floating_texts.append(FloatingText(f"+{points}", x, y))
+
+    def apply_pickup_effect(self, effect: dict) -> None:
+        """
+        Aplica um efeito de pickup ao estado actual do jogo.
+
+        Convenções esperadas no dicionário `effect` (tudo opcional; só aplica o que existir):
+          - type: string com o tipo lógico ("hp", "grenade", "score", "nuke", "time", ...).
+          - hp / heal / hp_delta: int – cura/dano no jogador.
+          - granades / grenades / grenades_delta: int – ajusta nº de granadas do jogador.
+          - score / points: int – pontos a adicionar.
+          - time / time_delta / seconds: int – segundos a adicionar ao tempo restante.
+          - nuke: bool – se True, mata todos os inimigos actuais.
+        """
+        if not effect:
+            return
+
+        player = self.player
+        gs = self.game_state
+
+        kind = str(effect.get("type", effect.get("kind", ""))).lower()
+
+        # ---------------- HP / cura ----------------
+        hp_delta = None
+        if "hp" in effect:
+            hp_delta = effect["hp"]
+        elif "heal" in effect:
+            hp_delta = effect["heal"]
+        elif "hp_delta" in effect:
+            hp_delta = effect["hp_delta"]
+
+        if player and isinstance(hp_delta, (int, float)):
+            player.hp = max(0, min(player.max_hp, player.hp + int(hp_delta)))
+
+        # ---------------- Granadas ----------------
+        gren_delta = None
+        for key in ("granades", "grenades", "grenade_delta", "grenades_delta"):
+            if key in effect:
+                gren_delta = effect[key]
+                break
+
+        if player and isinstance(gren_delta, int):
+            current = int(getattr(player, "granades", 0))
+            player.granades = max(0, current + gren_delta)
+
+        # ---------------- Pontuação ----------------
+        score_delta = effect.get("score", effect.get("points"))
+        if isinstance(score_delta, int):
+            fx_x = player.rect.centerx if player else None
+            fx_y = player.rect.top if player else None
+            self.add_score(score_delta, fx_x, fx_y)
+
+        # ---------------- Tempo extra ----------------
+        time_delta = None
+        for key in ("time", "time_delta", "seconds"):
+            if key in effect:
+                time_delta = effect[key]
+                break
+
+        if gs and isinstance(time_delta, (int, float)):
+            gs.time_left = max(0, gs.time_left + int(time_delta))
+
+        # ---------------- NUKE / bomba total ----------------
+        if effect.get("nuke") or kind in ("nuke", "bomb", "kill_all"):
+            for enemy in self.enemies:
+                if not getattr(enemy, "alive", False):
+                    continue
+                enemy.take_damage(99999)
+                if not enemy.alive:
+                    points = getattr(enemy, "points", 100)
+                    self.add_score(points, enemy.rect.centerx, enemy.rect.top)
+            # a limpeza fina fica a cargo do handle_collisions()
+
+        # ---------------- Som opcional ----------------
+        sfx_name = effect.get("sfx") or None
+        if sfx_name and hasattr(self.sound, "play_sfx"):
+            try:
+                self.sound.play_sfx(sfx_name)
+            except Exception:
+                pass
+        elif hasattr(self.sound, "play_sfx"):
+            # Som genérico de pickup, se existir
+            try:
+                self.sound.play_sfx("pickup")
+            except Exception:
+                pass
 
     def try_melee_attack(self) -> bool:
         """Tenta ataque melee (faca). Se matar alguém, dá pontos e texto flutuante."""
@@ -637,15 +753,15 @@ class Game:
         dt = dt_ms / 1000.0 if dt_ms else 0.0
 
         for g in self.granades[:]:
-        # movimento + timer normal
+            # movimento + timer normal
             g.update(dt)
 
-        # NOVO: se ainda está a voar, verifica se bateu em algum inimigo
+            # NOVO: se ainda está a voar, verifica se bateu em algum inimigo
             if g.is_flying():
                 gx, gy = g.get_center()
                 gx_i, gy_i = int(gx), int(gy)
 
-            # rectzinho à volta da granada para colisão mais amigável
+                # rectzinho à volta da granada para colisão mais amigável
                 radius = g.flight_radius
                 grenade_rect = pg.Rect(
                     gx_i - radius,
@@ -662,12 +778,12 @@ class Game:
                         g.explode()
                         break
 
-        # Explosão: aplica dano em área uma única vez
+            # Explosão: aplica dano em área uma única vez
             if g.is_exploding() and not g.damage_applied:
                 self.apply_granade_aoe_damage(g)
                 g.damage_applied = True
 
-        # Limpa granadas mortas
+            # Limpa granadas mortas
             if g.is_dead():
                 self.granades.remove(g)
 
@@ -702,6 +818,37 @@ class Game:
         self.screen.fill((0, 0, 0))
         if self.background:
             self.screen.blit(self.background, (-self.POV, 0))
+
+        # Pickups (rects simples, desenhados antes dos inimigos/jogador)
+ # Pickups (sprites ou rects simples)
+        if self.pickup_manager:
+            for p in self.pickup_manager.get_pickups():
+                data = p.get_draw_data()
+                if not data:
+                    continue
+
+                x = int(data.get("x", 0) - self.POV)
+                y = int(data.get("y", 0))
+                w = int(data.get("width", 0))
+                h = int(data.get("height", 0))
+                color = data.get("color", (255, 255, 0))
+
+                sprite = None
+                if hasattr(self, "pickup_sprites") and self.pickup_sprites:
+                    sprite = self.pickup_sprites.get(getattr(p, "kind", None))
+
+                if sprite is not None:
+                    img = sprite
+                    img_rect = img.get_rect()
+
+                    # centra a sprite dentro da "caixa lógica" do pickup
+                    draw_x = x + (w - img_rect.width) // 2
+                    draw_y = y + (h - img_rect.height) // 2
+
+                    self.screen.blit(img, (draw_x, draw_y))
+                else:
+                    # fallback: rect normal
+                    pg.draw_rect(self.screen, color, (x, y, w, h))
 
         if self.enemy_manager:
             self.enemy_manager.draw(self.screen, self.POV)
@@ -894,6 +1041,18 @@ class LevelScene(Scene):
             game.enemies = game.enemy_manager.get_enemies()
             new_enemy_projectiles = game.enemy_manager.get_projectiles()
             game.enemy_projectiles.extend(new_enemy_projectiles)
+
+        # --- UPDATE PICKUPS ---
+        if game.pickup_manager:
+            dt_seconds = dt / 1000.0 if dt else 0.0
+            player_rect = game.player.rect if game.player else None
+            pickup_events = game.pickup_manager.update(
+                dt_seconds,
+                player_rect=player_rect,
+            )
+            for ev in pickup_events:
+                # ev é um PickupEffectEvent
+                game.apply_pickup_effect(ev.effect)
 
         # --- UPDATE PROJÉCTEIS ---
         for proj in game.projectiles + game.enemy_projectiles:
