@@ -10,6 +10,7 @@ from config import (
     PLAYER_SPEED,
     PLAYER_GRAVITY,
     PLAYER_MAX_HP,
+    PLAYER_START_GRANADES,
     HEIGHT,
 )
 from input_manager import get_move_axis
@@ -49,6 +50,8 @@ class Player:
         self.max_hp = max_hp
         self.hp = self.max_hp
         self.alive = True
+
+        self.granades = PLAYER_START_GRANADES
 
         self.jump_speed = jump_speed
         self.platforms: list[pg.Rect] = []

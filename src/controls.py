@@ -12,6 +12,7 @@ UP = "UP"
 DOWN = "DOWN"
 JUMP = "JUMP"
 FIRE = "FIRE"
+GRANADE = "GRANADE"
 MENU = "MENU"
 PAUSE = "PAUSE"
 
@@ -22,6 +23,7 @@ DEFAULT_BINDINGS = {
     DOWN: config.KEY_DOWN,
     JUMP: config.KEY_JUMP,
     FIRE: config.KEY_FIRE,
+    GRANADE: config.KEY_SEC_FIRE,
     MENU: config.KEY_MENU,
     PAUSE: config.KEY_PAUSE,
 }

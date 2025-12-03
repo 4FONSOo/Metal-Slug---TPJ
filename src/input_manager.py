@@ -1,4 +1,3 @@
-
 # input_manager.py
 """
 Gestão de input de jogador (teclado).
@@ -26,6 +25,11 @@ def get_move_axis(keys) -> int:
 def is_fire_pressed(keys) -> bool:
     fire_key = controls.get_key(controls.FIRE)
     return keys[fire_key]
+
+
+def is_granade_pressed(keys) -> bool:
+    secFire_key = controls.get_key(controls.GRANADE)
+    return keys[secFire_key]
 
 
 def get_shoot_direction(

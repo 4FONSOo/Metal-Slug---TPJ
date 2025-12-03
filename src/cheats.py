@@ -16,7 +16,7 @@ class CheatState:
 class CheatEngine:
     def __init__(self, codes: List[str] | None = None) -> None:
         if codes is None:
-            codes = ["GOD", "TIME", "SPJ"]
+            codes = ["GOD", "TIME", "SPJ", "GRN"]
 
         self._cheats: Dict[str, CheatState] = {
             code.upper(): CheatState() for code in codes

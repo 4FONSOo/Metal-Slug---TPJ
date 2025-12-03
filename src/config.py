@@ -38,12 +38,15 @@ PLAYER_GRAVITY = 0.4
 
 PLAYER_MAX_HP = 1000
 
+PLAYER_START_GRANADES = 3        # granadas
+
+
 # -----------------------------
 # GAME STATE DEFAULTS
 # -----------------------------
 INITIAL_SCORE = 0
 INITIAL_CREDITS = 5
-INITIAL_TIME_LEFT = 10 #60           # segundos por nível
+INITIAL_TIME_LEFT = 60           # segundos por nível
 INITIAL_LEVEL_NAME = "Nível 1"
 
 # Timer do HUD / relógio (1 segundo)
@@ -58,12 +61,13 @@ KEY_MENU = pg.K_ESCAPE   # sair para menu / back
 KEY_PAUSE = pg.K_P       # pausar o jogo
 
 KEY_FIRE = pg.K_SPACE    # disparar / melee
+KEY_SEC_FIRE = pg.K_LCTRL
 
 KEY_UP = pg.K_UP
 KEY_DOWN = pg.K_DOWN
 KEY_LEFT = pg.K_LEFT
 KEY_RIGHT = pg.K_RIGHT
-KEY_JUMP = pg.K_LALT     # reservado para salto separado se quiseres
+KEY_JUMP = pg.K_LALT     
 
 # -----------------------------
 # HUD / INTERFACE
@@ -106,6 +110,9 @@ CHEAT_FLASH_COLOR_GOD_OFF = (255, 0, 0)
 
 CHEAT_FLASH_COLOR_TIME_ON = (0, 200, 255)
 CHEAT_FLASH_COLOR_TIME_OFF = (255, 120, 120)
+
+CHEAT_FLASH_COLOR_GRN_ON = (255,0,0)
+CHEAT_FLASH_COLOR_GRN_OFF = (125,125,125)
 
 CHEAT_FLASH_COLOR_SPJ_ON = (0, 255, 255)
 CHEAT_FLASH_COLOR_SPJ_OFF = (255, 100, 100)
@@ -164,7 +171,7 @@ MENU_VOLUME_STEP = 1
 # -----------------------------
 # CHEATS
 # -----------------------------
-CHEAT_CODES = ["GOD", "TIME", "SPJ"]
+CHEAT_CODES = ["GOD", "TIME", "SPJ", "GRN"]
 
 CHEAT_SUPER_JUMP_VALUE = -35
 CHEAT_NORMAL_JUMP_VALUE = -12

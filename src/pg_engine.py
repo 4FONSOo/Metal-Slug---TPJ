@@ -86,14 +86,16 @@ def mouse_get_pos():
     return pygame.mouse.get_pos()
 
 
-# Constantes de eventos
+# Constantes
+
 QUIT = pygame.QUIT
 KEYDOWN = pygame.KEYDOWN
 KEYUP = pygame.KEYUP
 USEREVENT = pygame.USEREVENT
 MOUSEBUTTONDOWN = pygame.MOUSEBUTTONDOWN
 
-# Algumas teclas mais usadas
+# TEclas pré-definidas
+
 K_ESCAPE = pygame.K_ESCAPE
 K_RETURN = pygame.K_RETURN
 K_SPACE = pygame.K_SPACE
@@ -104,6 +106,8 @@ K_RIGHT = pygame.K_RIGHT
 K_P = pygame.K_p
 K_M = pygame.K_m
 K_LALT = pygame.K_LALT
+K_LCTRL = pygame.K_LCTRL
+
 
 
 # -----------------------------

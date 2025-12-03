@@ -17,7 +17,8 @@ import controls
 
 from scene import Scene
 from cheats import CheatEngine
-from input_manager import is_fire_pressed, get_shoot_direction
+from input_manager import is_fire_pressed, get_shoot_direction, is_granade_pressed
+
 
 from entity.player import Player
 from entity.enemy import EnemyManager
@@ -27,6 +28,7 @@ from sound import SoundManager
 from config import DIFFICULTY_PRESETS, DEFAULT_DIFFICULTY, CHEAT_CODES
 from pg_engine import Vector2
 from score import ScoreManager, EnterNameScene, HighScoreScene
+from entity.granade import Granade  # lógica da granada
 
 # Import no fim do ficheiro para evitar circular? Não, aqui é seguro:
 from scenes.menu import Menu as MenuScene  # cena de menu principal
@@ -138,12 +140,16 @@ class Game:
         self.enemies: list[object] = []
         self.projectiles: list[Projectile] = []          # projécteis do jogador
         self.enemy_projectiles: list[Projectile] = []    # projécteis dos inimigos
+        self.granades: list[Granade] = []                # granadas do jogador
         self.floating_texts: list[FloatingText] = []
 
         # Disparo / mira
         self.shoot_pressed = False
         self.last_shot_time = 0
         self.aim_dir = Vector2(1, 0)
+
+        # Fogo secundário (granada)
+        self.granade_pressed = False
 
         # POV = deslocamento da “câmara” horizontal
         self.POV = 0
@@ -159,6 +165,7 @@ class Game:
         self.cheat_engine = CheatEngine(CHEAT_CODES)
         self.god_mode = False
         self.infinite_time = False
+        self.infinite_granades = False
         self.super_jump = False
 
         # FX de flash de ecrã
@@ -223,12 +230,6 @@ class Game:
     # CHEATS
     # -----------------------------
     def process_cheats(self, event) -> bool:
-        """
-        Processa um evento à procura de sequências de cheats.
-
-        Devolve:
-          - True se o evento foi consumido pelo sistema de cheats
-        """
         if event.type != pg.KEYDOWN:
             return False
 
@@ -259,13 +260,23 @@ class Game:
                         if active
                         else config.CHEAT_NORMAL_JUMP_VALUE
                     )
+            elif code == "GRN":
+                self.infinite_granades = active
+                self.flash(
+                    config.CHEAT_FLASH_COLOR_GRN_ON if active else config.CHEAT_FLASH_COLOR_GRN_OFF
+                )
+                if active and self.player and getattr(self.player, "granades", 0) <= 0:
+                    self.player.granades = 1
+
         return consumed
+
 
     def reset_all_state(self):
         """Reset total: cheats, estado lógico, entidades e música."""
         self.cheat_engine.reset_all()
         self.god_mode = False
         self.infinite_time = False
+        self.infinite_granades = False
         self.super_jump = False
 
         # Reset da pontuação actual e estado lógico do jogo
@@ -280,7 +291,10 @@ class Game:
         self.enemies.clear()
         self.projectiles.clear()
         self.enemy_projectiles.clear()
+        self.granades.clear()
         self.floating_texts.clear()
+        self.shoot_pressed = False
+        self.granade_pressed = False
         try:
             self.sound.stop_music()
         except Exception:
@@ -375,8 +389,10 @@ class Game:
         # Listas de projécteis / textos
         self.projectiles = []
         self.enemy_projectiles = []
+        self.granades = []
         self.floating_texts = []
         self.shoot_pressed = False
+        self.granade_pressed = False
         self.POV = 0
 
         # Muda para a cena de jogo
@@ -573,10 +589,116 @@ class Game:
         self.last_shot_time = now
 
     # -----------------------------
+    # GRANADAS
+    # -----------------------------
+    def handle_player_granade(self):
+        if not self.player:
+            return
+
+        keys = pg.get_keys()
+
+        # Se não está a carregar na granada, reset ao estado e sai
+        if not is_granade_pressed(keys):
+            self.granade_pressed = False
+            return
+
+        # Evita repetir enquanto a tecla está mantida
+        if self.granade_pressed:
+            return
+
+        self.granade_pressed = True
+
+        current = getattr(self.player, "granades", 0)
+
+        if self.infinite_granades:
+            if current <= 0:
+                self.player.granades = 1
+        else:
+            if current <= 0:
+                return
+            self.player.granades = current - 1
+
+        facing = getattr(self.player, "facing", 1)
+        direction = 1 if facing >= 0 else -1
+
+        g = Granade(
+            x=self.player.rect.centerx,
+            y=self.player.rect.centery,
+            direction=direction,
+            owner="player",
+        )
+        self.granades.append(g)
+
+    def update_granades(self, dt_ms: float):
+        """
+        Actualiza lógica das granadas.
+        dt_ms vem do clock (milissegundos).
+        """
+        dt = dt_ms / 1000.0 if dt_ms else 0.0
+
+        for g in self.granades[:]:
+        # movimento + timer normal
+            g.update(dt)
+
+        # NOVO: se ainda está a voar, verifica se bateu em algum inimigo
+            if g.is_flying():
+                gx, gy = g.get_center()
+                gx_i, gy_i = int(gx), int(gy)
+
+            # rectzinho à volta da granada para colisão mais amigável
+                radius = g.flight_radius
+                grenade_rect = pg.Rect(
+                    gx_i - radius,
+                    gy_i - radius,
+                    radius * 2,
+                    radius * 2,
+                )
+
+                for enemy in self.enemies:
+                    if not enemy.alive:
+                        continue
+                    if enemy.rect.colliderect(grenade_rect):
+                        # Bateu em inimigo → explode já
+                        g.explode()
+                        break
+
+        # Explosão: aplica dano em área uma única vez
+            if g.is_exploding() and not g.damage_applied:
+                self.apply_granade_aoe_damage(g)
+                g.damage_applied = True
+
+        # Limpa granadas mortas
+            if g.is_dead():
+                self.granades.remove(g)
+
+    def apply_granade_aoe_damage(self, granade: Granade):
+        """
+        Aplica dano em área à volta da granada.
+        Só afecta inimigos (por agora).
+        """
+        gx, gy = granade.get_center()
+        r = granade.explosion_radius
+        r2 = r * r
+
+        for enemy in self.enemies:
+            if not enemy.alive:
+                continue
+
+            ex, ey = enemy.rect.center
+            dx = ex - gx
+            dy = ey - gy
+
+            if dx * dx + dy * dy <= r2:
+                enemy.take_damage(granade.damage)
+                if not enemy.alive:
+                    points = getattr(enemy, "points", 100)
+                    self.add_score(points, enemy.rect.centerx, enemy.rect.top)
+
+    # -----------------------------
     # DRAW HELPERS
     # -----------------------------
     def draw_scene(self):
-        """Desenha cenário, inimigos, jogador, projécteis e textos flutuantes."""
+        """Desenha cenário, inimigos, jogador, projécteis, granadas e textos flutuantes."""
         self.screen.fill((0, 0, 0))
         if self.background:
             self.screen.blit(self.background, (-self.POV, 0))
@@ -594,6 +716,19 @@ class Game:
             if proj:
                 proj.draw(self.screen, self.POV)
 
+        # Granadas: bola vermelha (maior quando explode)
+        for g in self.granades:
+            data = g.get_draw_data()
+            if not data:
+                continue
+
+            x = int(data["x"] - self.POV)
+            y = int(data["y"])
+            radius = int(data["radius"])
+
+            color = (255, 80, 80) if data["exploding"] else (255, 0, 0)
+            pg.draw_circle(self.screen, color, (x, y), radius)
+
         for text in self.floating_texts:
             text.draw(self.screen, self.POV)
 
@@ -605,10 +740,22 @@ class Game:
         tempo_str = "∞" if self.infinite_time else f"{self.game_state.time_left}s"
         # Pontuação vem do ScoreManager (mantido em sync com o GameState)
         score_value = self.score_manager.current_score if self.score_manager else 0
+
+        granades_str = ""
+        if self.player and hasattr(self.player, "granades"):
+            # se cheat de granadas infinitas estiver activo → ícone de infinito
+            if getattr(self, "infinite_granades", False):
+                g_value = "∞"
+            else:
+                g_value = str(self.player.granades)
+
+            granades_str = f"   G:{g_value}"
+
         top_text = (
             f"Pontuação: {score_value}   "
             f"Tempo: {tempo_str}   "
             f"Dif: {self.difficulty}"
+            f"{granades_str}"
         )
         draw_text_with_outline(
             self.screen,
@@ -739,6 +886,7 @@ class LevelScene(Scene):
             game.player.update_animation(dt)
             game.player.apply_gravity()
             game.handle_player_shoot()
+            game.handle_player_granade()
 
         # --- UPDATE INIMIGOS ---
         if game.enemy_manager:
@@ -751,6 +899,9 @@ class LevelScene(Scene):
         for proj in game.projectiles + game.enemy_projectiles:
             if proj:
                 proj.update()
+
+        # --- UPDATE GRANADAS ---
+        game.update_granades(dt)
 
         # --- COLISÕES ---
         game.handle_collisions()
