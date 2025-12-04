@@ -16,6 +16,7 @@ import config
 import controls
 
 from scene import Scene
+from scenes.menu import Menu as MenuSecene, PauseMenu
 from cheats import CheatEngine
 from managers.input_manager import is_fire_pressed, get_shoot_direction, is_granade_pressed
 from managers.pickup_manager import PickupManager, PickupEffectEvent
@@ -366,25 +367,21 @@ class Game:
         self.bg_width = self.level["bg_width"]
         self.platforms = self.level["platforms"]
 
- # Gestor de pickups (power-ups)
-        ground_y = None
-        if self.platforms:
-            # tentativa razoável: usar a plataforma mais baixa como fallback de "chão global"
-            try:
-                ground_y = max(p.top for p in self.platforms)
-            except AttributeError:
-                # caso as plataformas sejam tuples (x, y, w, h)
-                ground_y = max(p[1] for p in self.platforms)
+        # Gestor de pickups (power-ups)
+        # Chão global = fundo do ecrã; se não houver plataforma debaixo do X,
+        # o pickup cai até aqui em vez de ficar pendurado a meio.
+        ground_y = config.HEIGHT
 
         self.pickup_manager = PickupManager(
             level_width=self.bg_width,
             ground_y=ground_y,
-            platforms=self.platforms,   # <- NOVO: passa as plataformas
+            platforms=self.platforms,   # plataformas continuam a ser usadas para pousar
             auto_spawn=True,
         )
 
         self.sound.stop_music()
         self.sound.play_music("theme.mp3")
+        self.sound.play_level_start()
 
         # Jogador
         max_hp = self._get_player_max_hp_for_difficulty()
@@ -554,7 +551,7 @@ class Game:
             if not melee_rect.colliderect(enemy.rect):
                 continue
 
-            # Só acerta quem estiver à frente (nada de facadas pelas costas)
+            # Só acerta quem estiver à frente
             if facing == 1 and enemy.rect.centerx < player_rect.centerx:
                 continue
             if facing == -1 and enemy.rect.centerx > player_rect.centerx:
@@ -566,14 +563,21 @@ class Game:
         if not alvo:
             return False
 
+        # Som de melee (faca1/faca2 aleatório)
+        self.sound.play_melee()
+
         # Faca é “one-shot kill”
         alvo.take_damage(config.MELEE_KILL_DAMAGE)
 
         if not alvo.alive:
             points = getattr(alvo, "points", 100)
             self.add_score(points, alvo.rect.centerx, alvo.rect.top)
+            # Som de morte de inimigo
+            self.sound.play_enemy_death()
 
         return True
+
+
 
     def handle_collisions(self):
         """Trata de todas as colisões: projécteis, player, inimigos, contacto físico."""
@@ -588,6 +592,8 @@ class Game:
                     if not enemy.alive:
                         points = getattr(enemy, "points", 100)
                         self.add_score(points, enemy.rect.centerx, enemy.rect.top)
+                        # Som de morte de inimigo
+                        self.sound.play_enemy_death()
 
         # Projécteis de inimigos em jogador
         if self.player and not self.god_mode:
@@ -614,7 +620,9 @@ class Game:
             p for p in self.enemy_projectiles if p and (p.alive or p.hit_flash > 0)
         ]
 
+        # GAME OVER por morte do jogador
         if self.player and not self.player.alive:
+            self.sound.play_game_over_sfx()   # <- AQUI
             self.handle_game_over()
 
     def handle_player_shoot(self):
@@ -701,6 +709,7 @@ class Game:
             )
         )
 
+        self.sound.play_shot()
         self.shoot_pressed = True
         self.last_shot_time = now
 
@@ -752,11 +761,12 @@ class Game:
         """
         dt = dt_ms / 1000.0 if dt_ms else 0.0
 
+        # Iterar por cópia para poder remover da lista original
         for g in self.granades[:]:
             # movimento + timer normal
             g.update(dt)
 
-            # NOVO: se ainda está a voar, verifica se bateu em algum inimigo
+            # 1) Enquanto está a voar, verifica se bateu em algum inimigo
             if g.is_flying():
                 gx, gy = g.get_center()
                 gx_i, gy_i = int(gx), int(gy)
@@ -778,12 +788,18 @@ class Game:
                         g.explode()
                         break
 
-            # Explosão: aplica dano em área uma única vez
+            # 2) Explosão: aplica dano em área uma única vez
             if g.is_exploding() and not g.damage_applied:
+                # Som da explosão
+                try:
+                    self.sound.play_grenade_explosion()
+                except Exception:
+                    pass
+
                 self.apply_granade_aoe_damage(g)
                 g.damage_applied = True
 
-            # Limpa granadas mortas
+            # 3) Limpa granadas mortas
             if g.is_dead():
                 self.granades.remove(g)
 
@@ -809,6 +825,8 @@ class Game:
                 if not enemy.alive:
                     points = getattr(enemy, "points", 100)
                     self.add_score(points, enemy.rect.centerx, enemy.rect.top)
+                    # Som de morte de inimigo
+                    self.sound.play_enemy_death()
 
     # -----------------------------
     # DRAW HELPERS
@@ -819,8 +837,7 @@ class Game:
         if self.background:
             self.screen.blit(self.background, (-self.POV, 0))
 
-        # Pickups (rects simples, desenhados antes dos inimigos/jogador)
- # Pickups (sprites ou rects simples)
+        # Pickups (sprites ou rects simples)
         if self.pickup_manager:
             for p in self.pickup_manager.get_pickups():
                 data = p.get_draw_data()
@@ -993,12 +1010,11 @@ class LevelScene(Scene):
                     game.change_scene(MenuScene(game))
                     return
 
-                if (
-                    event.key == pause_key
-                    and not cheat_consumed
-                    and game.game_state
-                ):
-                    game.game_state.toggle_pause()
+                if event.key == pause_key and not cheat_consumed:
+                    # Abre o menu de pausa in-game (áudio / controlos / sair)
+                    game.change_scene(PauseMenu(game, previous_scene=self))
+                    return
+
 
             # Timer do relógio
             if game.game_state and event.type == game.game_state.timer_event:
@@ -1008,12 +1024,29 @@ class LevelScene(Scene):
     def update(self, dt: float):
         game = self.game
 
-        # Timeout de nível
-        if (
+    # ----------------- CONDIÇÕES DE FIM DE NÍVEL -----------------
+        timeout = (
             game.game_state
             and game.game_state.time_left <= 0
             and not game.infinite_time
-        ):
+        )
+
+        if timeout:
+            player_alive = bool(game.player and game.player.alive)
+
+            if player_alive:
+                # Fim de nível por tempo → sucesso (end.mp3)
+                try:
+                    game.sound.play_level_end()
+                except Exception:
+                    pass
+            else:
+                # Se por algum motivo o player já não estiver vivo → game over
+                try:
+                    game.sound.play_game_over_sfx()
+                except Exception:
+                    pass
+
             game.handle_game_over()
             return
 
@@ -1059,6 +1092,7 @@ class LevelScene(Scene):
             if proj:
                 proj.update()
 
+
         # --- UPDATE GRANADAS ---
         game.update_granades(dt)
 
@@ -1094,3 +1128,4 @@ class LevelScene(Scene):
 
 if __name__ == "__main__":
     Game().run()
+

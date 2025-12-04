@@ -71,7 +71,7 @@ class Pickup:
       - x, y: posição (canto superior esquerdo)
       - lifetime: tempo de vida restante (segundos)
       - falling: se ainda está a cair ou já pousou
-      - ground_y: y do "chão" onde deve pousar (se None, cai para sempre)
+      - ground_y: y do "chão" onde deve pousar (se None, usa fundo do ecrã)
     """
 
     kind: PickupKind
@@ -111,14 +111,20 @@ class Pickup:
             if self.ground_y is not None:
                 new_y = self.y + self.vy * dt
                 if new_y + self.height >= self.ground_y:
-                    # pousou
+                    # pousou no chão/plataforma definida
                     self.y = self.ground_y - self.height
                     self.falling = False
                 else:
                     self.y = new_y
             else:
-                # sem chão definido → cai para sempre
-                self.y += self.vy * dt
+                # sem chão definido → usa fundo do ecrã como "chão" global
+                new_y = self.y + self.vy * dt
+                screen_bottom = config.HEIGHT
+                if new_y + self.height >= screen_bottom:
+                    self.y = screen_bottom - self.height
+                    self.falling = False
+                else:
+                    self.y = new_y
 
     # -----------------------------
     # COLISÃO / DRAW
@@ -142,7 +148,7 @@ class Pickup:
             "width": self.width,
             "height": self.height,
             "color": _get_color_for_kind(self.kind),
-            "kind": self.kind.value,  # <- NOVO: "hp_up", "grenades", etc.
+            "kind": self.kind.value,  # "hp_up", "grenades", etc.
         }
 
     # -----------------------------
@@ -157,43 +163,44 @@ class Pickup:
           - hp / heal / hp_delta
           - grenades_delta
           - nuke: bool
+          - sfx: nome do ficheiro de som (para o SoundManager)
         """
         if self.kind == PickupKind.HP_UP:
             return {
                 "type": "hp_up",
                 "hp": config.HP_UP_AMOUNT,
-                "sfx": "pickup_hp_up",
+                "sfx": "PickUp2.mp3",  # ou o que já usares aqui
             }
 
         if self.kind == PickupKind.HP_DOWN:
             return {
                 "type": "hp_down",
                 "hp": -config.HP_DOWN_AMOUNT,
-                "sfx": "pickup_hp_down",
+                "sfx": "PickUp2.mp3",
             }
 
         if self.kind == PickupKind.GRENADES:
+            # GRANADAS → PickUp2.mp3
             return {
                 "type": "grenades",
                 "grenades_delta": config.GRENADE_RELOAD_AMOUNT,
-                "sfx": "pickup_grenade",
+                "sfx": "PickUp2.mp3",
             }
 
         if self.kind == PickupKind.WEAPON_UP:
-            # Ainda não estás a usar ammo/fire_rate no Game,
-            # mas os campos já vão preparados.
+            # UPGRADE → PickUp1.mp3
             return {
                 "type": "weapon_up",
                 "ammo": config.WEAPON_UPGRADE_AMMO,
                 "fire_rate_multiplier": config.WEAPON_UPGRADE_FIRE_RATE_MULTIPLIER,
-                "sfx": "pickup_weapon",
+                "sfx": "PickUp1.mp3",
             }
 
         if self.kind == PickupKind.NUKE:
             return {
                 "type": "nuke",
                 "nuke": True,
-                "sfx": "pickup_nuke",
+                "sfx": "PickUp2.mp3",
             }
 
         # fallback paranoico
@@ -243,7 +250,7 @@ def _compute_ground_y_for_x(
     """
     Procura a plataforma mais "alta" (menor y) que cobre o X dado.
 
-    Se não encontrar nenhuma, usa fallback_ground_y.
+    Se não encontrar nenhuma, usa fallback_ground_y (ou None).
     """
     best_y: Optional[int] = None
     xi = int(x)
