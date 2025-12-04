@@ -1,6 +1,6 @@
-# projectile_manager.py
+# managers/projectile_manager.py
 """
-Gestor de projécteis (balas, granadas, etc.)
+Gestor de projécteis (balas, etc.)
 
 Objectivo:
   - Centralizar a gestão de projécteis do jogador e dos inimigos.
@@ -8,12 +8,13 @@ Objectivo:
   - Só trata de:
       * armazenar projécteis
       * actualizá-los
-      * limpar os mortos
-  - A lógica de colisão fica noutro lado (CollisionManager).
+      * limpar todos ao recomeçar nível (clear)
+  - A lógica de colisão e o desenho ficam noutro lado.
 
-Integração típica (futuro):
-  - O Game ou a Scene cria o ProjectileManager.
-  - Sempre que dispara, regista o projéctil aqui.
+Integração típica:
+
+  - O Game cria um ProjectileManager.
+  - Sempre que dispara, regista o projéctil aqui (player ou inimigo).
   - A cada frame chama update(dt_seconds).
   - Usa os getters para percorrer listas de projécteis.
 """
@@ -29,7 +30,7 @@ class ProjectileLike(Protocol):
 
     alive: bool
 
-    def update(self, dt: float) -> None:
+    def update(self) -> None:
         ...
 
 
@@ -39,7 +40,7 @@ class ProjectileGroup:
 
     player: List[ProjectileLike]
     enemies: List[ProjectileLike]
-    others: List[ProjectileLike]  # granadas, lasers especiais, etc.
+    others: List[ProjectileLike]  # reservado para tipos especiais, se quiseres
 
 
 class ProjectileManager:
@@ -49,7 +50,7 @@ class ProjectileManager:
     Mantém três grupos lógicos:
       - projécteis do jogador
       - projécteis de inimigos
-      - outros (granadas, especiais, etc.)
+      - outros (granadas, especiais, etc., se decidires usar)
 
     Não sabe nada de colisões nem de desenho.
     """
@@ -72,30 +73,33 @@ class ProjectileManager:
     def add_other_projectile(self, projectile: ProjectileLike) -> None:
         """
         Para projécteis que não sejam balas normais:
-          - granadas
           - mísseis
           - lasers especiais
+          - etc.
+        (granadas neste projecto continuam a ser geridas à parte)
         """
         self._other_projectiles.append(projectile)
 
     # ------------------------------------------------------------------ #
-    # Update / limpeza
+    # Update
     # ------------------------------------------------------------------ #
 
     def update(self, dt_seconds: float) -> None:
-        """Actualiza todos os projécteis e remove os que já morreram."""
+        """
+        Actualiza todos os projécteis.
+
+        Nota: neste projecto, Projectile.update() não recebe dt, por isso
+        o dt_seconds é ignorado aqui. Se no futuro mudares a API dos
+        projécteis para receber dt, basta passar dt_seconds para update().
+        """
         for proj in self._player_projectiles:
-            proj.update(dt_seconds)
+            proj.update()
 
         for proj in self._enemy_projectiles:
-            proj.update(dt_seconds)
+            proj.update()
 
         for proj in self._other_projectiles:
-            proj.update(dt_seconds)
-
-        self._player_projectiles = [p for p in self._player_projectiles if p.alive]
-        self._enemy_projectiles = [p for p in self._enemy_projectiles if p.alive]
-        self._other_projectiles = [p for p in self._other_projectiles if p.alive]
+            proj.update()
 
     # ------------------------------------------------------------------ #
     # Acesso às listas

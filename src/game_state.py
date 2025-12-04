@@ -19,7 +19,9 @@ from scene import Scene
 from scenes.menu import Menu as MenuSecene, PauseMenu
 from cheats import CheatEngine
 from managers.input_manager import is_fire_pressed, get_shoot_direction, is_granade_pressed
-from managers.pickup_manager import PickupManager, PickupEffectEvent
+from managers.pickup_manager import PickupManager
+from managers.projectile_manager import ProjectileManager
+from managers.collision_manager import CollisionManager
 
 from entity.player import Player
 from entity.enemy import EnemyManager
@@ -153,6 +155,12 @@ class Game:
         self.granades: list[Granade] = []                # granadas do jogador
         self.floating_texts: list[FloatingText] = []
 
+        # Gestor de projécteis
+        self.projectile_manager: ProjectileManager | None = None
+
+        # Gestor de colisões (stateless, pode ser partilhado)
+        self.collision_manager = CollisionManager()
+
         # Pickups / power-ups
         self.pickup_manager: PickupManager | None = None
 
@@ -164,7 +172,9 @@ class Game:
         # Upgrade de arma (pickup WEAPON_UP)
         self.weapon_upgrade_active = False
         self.weapon_upgrade_shots_left = 0
+        self.weapon_upgrade_stacks = 0
         self.weapon_fire_rate_multiplier = 1.0
+        self.weapon_damage_multiplier = 1.0
 
         # Fogo secundário (granada)
         self.granade_pressed = False
@@ -193,9 +203,9 @@ class Game:
         # Começamos no menu principal
         self.change_scene(MenuScene(self))
 
-    # -----------------------------
+    # ----------------------------- #
     # GESTÃO DE CENAS
-    # -----------------------------
+    # ----------------------------- #
     def change_scene(self, new_scene: Scene):
         """Troca de cena de forma civilizada."""
         if self.current_scene is not None:
@@ -203,9 +213,9 @@ class Game:
         self.current_scene = new_scene
         self.current_scene.on_enter()
 
-    # -----------------------------
+    # ----------------------------- #
     # DIFICULDADE
-    # -----------------------------
+    # ----------------------------- #
     def update_difficulty_preset(self):
         """Actualiza o preset de dificuldade actual a partir da config."""
         self.difficulty_preset = DIFFICULTY_PRESETS.get(
@@ -236,17 +246,17 @@ class Game:
         damage_multiplier = preset.get("ENEMY_DAMAGE_MULTIPLIER", 1.0)
         return max_spawns, max_active, damage_multiplier
 
-    # -----------------------------
+    # ----------------------------- #
     # FX
-    # -----------------------------
+    # ----------------------------- #
     def flash(self, color, frames=None):
         """Flash no ecrã com uma cor, durante N frames (por defeito poucos)."""
         self.flash_color = color
         self.flash_frames = frames if frames is not None else config.SCREEN_FLASH_DEFAULT_FRAMES
 
-    # -----------------------------
+    # ----------------------------- #
     # CHEATS
-    # -----------------------------
+    # ----------------------------- #
     def process_cheats(self, event) -> bool:
         if event.type != pg.KEYDOWN:
             return False
@@ -313,6 +323,8 @@ class Game:
         if self.pickup_manager:
             self.pickup_manager.clear()
         self.pickup_manager = None
+        if self.projectile_manager:
+            self.projectile_manager.clear()
 
         # Reset do estado de upgrade de arma
         self.weapon_upgrade_active = False
@@ -328,9 +340,9 @@ class Game:
         except Exception:
             pass
 
-    # -----------------------------
+    # ----------------------------- #
     # GAME OVER / START
-    # -----------------------------
+    # ----------------------------- #
     def handle_game_over(self):
         """Mostra GAME OVER, trata de highscores e volta ao menu."""
         # Sincroniza pontuação actual com o ScoreManager (por segurança)
@@ -392,6 +404,11 @@ class Game:
             auto_spawn=True,
         )
 
+        # Gestor de projécteis
+        self.projectile_manager = ProjectileManager()
+        self.projectiles = self.projectile_manager.get_player_projectiles()
+        self.enemy_projectiles = self.projectile_manager.get_enemy_projectiles()
+
         self.sound.stop_music()
         self.sound.play_music("theme.mp3")
         self.sound.play_level_start()
@@ -428,8 +445,6 @@ class Game:
         self.enemies = self.enemy_manager.get_enemies()
 
         # Listas de projécteis / textos
-        self.projectiles = []
-        self.enemy_projectiles = []
         self.granades = []
         self.floating_texts = []
         self.shoot_pressed = False
@@ -439,9 +454,9 @@ class Game:
         # Muda para a cena de jogo
         self.change_scene(LevelScene(self))
 
-    # -----------------------------
+    # ----------------------------- #
     # COMBATE / HELPERS USADOS PELO LEVELSCENE
-    # -----------------------------
+    # ----------------------------- #
     def add_score(self, points: int, x: int | None = None, y: int | None = None):
         """Adiciona pontos à pontuação actual e, opcionalmente, cria texto flutuante."""
         if points <= 0:
@@ -549,7 +564,12 @@ class Game:
                 pass
 
     def activate_weapon_upgrade(self, ammo: int, fire_rate_multiplier: float) -> None:
-        """Activa/empilha o upgrade de arma (pickup WEAPON_UP)."""
+        """
+        Activa/empilha o upgrade de arma (pickup WEAPON_UP).
+
+        - Até WEAPON_UPGRADE_MAX_STACKS upgrades empilham efeito na arma.
+        - A partir do 4.º, não aumenta mais o poder, só dá munição extra (2x ammo base).
+        """
         ammo = max(0, int(ammo or 0))
         if ammo <= 0:
             return
@@ -578,7 +598,7 @@ class Game:
 
         # Multiplicador acumulado: base^stacks
         self.weapon_fire_rate_multiplier = base_fire_mult ** stacks
-        self.weapon_damage_multiplier = base_dmg_mult ** stacks         
+        self.weapon_damage_multiplier = base_dmg_mult ** stacks
 
     def try_melee_attack(self) -> bool:
         """Tenta ataque melee (faca). Se matar alguém, dá pontos e texto flutuante."""
@@ -628,52 +648,86 @@ class Game:
 
         return True
 
-
-
     def handle_collisions(self):
         """Trata de todas as colisões: projécteis, player, inimigos, contacto físico."""
-        # Projécteis do jogador em inimigos
-        for enemy in self.enemies:
-            if not enemy.alive:
+        if not self.collision_manager:
+            return
+
+        result = self.collision_manager.detect_collisions(
+            self.player,
+            self.enemies,
+            self.projectiles,
+            self.enemy_projectiles,
+        )
+
+        # ---------------- Projécteis do player em inimigos ----------------
+        for hit in result.enemy_hits:
+            proj = hit.projectile
+            enemy = hit.enemy
+
+            if not getattr(enemy, "alive", False):
                 continue
-            for proj in self.projectiles:
-                if proj and proj.alive and enemy.rect.colliderect(proj.rect):
-                    enemy.take_damage(proj.damage)
-                    proj.trigger_hit()
-                    if not enemy.alive:
-                        points = getattr(enemy, "points", 100)
-                        self.add_score(points, enemy.rect.centerx, enemy.rect.top)
-                        # Som de morte de inimigo
-                        self.sound.play_enemy_death()
 
-        # Projécteis de inimigos em jogador
-        if self.player and not self.god_mode:
-            for proj in self.enemy_projectiles:
-                if proj and proj.alive and self.player.rect.colliderect(proj.rect):
-                    self.player.take_damage(proj.damage)
-                    proj.trigger_hit()
+            damage = getattr(proj, "damage", 0)
+            try:
+                enemy.take_damage(damage)
+            except Exception:
+                pass
 
-        # Contacto físico jogador <-> inimigo
+            if hasattr(proj, "trigger_hit"):
+                try:
+                    proj.trigger_hit()
+                except Exception:
+                    pass
+
+            if not getattr(enemy, "alive", False):
+                points = getattr(enemy, "points", 100)
+                self.add_score(points, enemy.rect.centerx, enemy.rect.top)
+                # Som de morte de inimigo
+                try:
+                    self.sound.play_enemy_death()
+                except Exception:
+                    pass
+
+        # ---------------- Projécteis de inimigos em player ----------------
         if self.player and not self.god_mode:
-            for enemy in self.enemies:
-                if not enemy.alive:
+            for hit in result.player_hits:
+                proj = hit.projectile
+
+                if not getattr(proj, "alive", False):
                     continue
-                if self.player.rect.colliderect(enemy.rect):
+
+                damage = getattr(proj, "damage", 0)
+                self.player.take_damage(damage)
+
+                if hasattr(proj, "trigger_hit"):
+                    try:
+                        proj.trigger_hit()
+                    except Exception:
+                        pass
+
+        # ---------------- Contacto físico player <-> inimigos ----------------
+        if self.player and not self.god_mode:
+            for contact in result.contact_hits:
+                enemy = contact.enemy
+                if not getattr(enemy, "alive", False):
+                    continue
+
+                try:
                     self.player.take_damage(enemy.contact_damage_to_player())
                     enemy.take_damage(enemy.contact_self_damage())
+                except Exception:
+                    pass
 
-        # Limpar mortos / impactos
-        self.enemies = [e for e in self.enemies if e.alive]
-        self.projectiles = [
-            p for p in self.projectiles if p and (p.alive or p.hit_flash > 0)
-        ]
-        self.enemy_projectiles = [
-            p for p in self.enemy_projectiles if p and (p.alive or p.hit_flash > 0)
-        ]
+        # Limpar inimigos mortos (projécteis ficam a cargo do ProjectileManager)
+        self.enemies = [e for e in self.enemies if getattr(e, "alive", False)]
 
         # GAME OVER por morte do jogador
         if self.player and not self.player.alive:
-            self.sound.play_game_over_sfx()   # <- AQUI
+            try:
+                self.sound.play_game_over_sfx()
+            except Exception:
+                pass
             self.handle_game_over()
 
     def handle_player_shoot(self):
@@ -705,9 +759,9 @@ class Game:
         if (now - self.last_shot_time) < interval_ms:
             return
 
-        # Detectar “tecla acabou de ser carregada” (para não haver disparo contínuo)
+        # Detectar “tecla acabou de ser carregada”
         just_pressed = not self.shoot_pressed
-        upgraded_on = self.weapon_upgrade_active and self.weapon_upgrade_shots_left > 0
+        upgraded_available = self.weapon_upgrade_active and self.weapon_upgrade_shots_left > 0
 
         # 1) Primeiro tenta melee (pode repetir enquanto mantém a tecla, respeitando o intervalo)
         if self.try_melee_attack():
@@ -717,7 +771,7 @@ class Game:
 
         # 2) Pistola base só dispara quando a tecla é *acabada* de carregar;
         #    com upgrade activo, permite disparo contínuo (desde que respeite o intervalo).
-        if not upgraded_on and not just_pressed:
+        if not upgraded_available and not just_pressed:
             self.shoot_pressed = True
             return
 
@@ -777,9 +831,9 @@ class Game:
 
         # 2.4) Criar projécteis
         for i in range(bullets_to_fire):
-            # No upgrade, dá offset para se verem 5 quadrados distintos
+            # No upgrade, dá offset maior para se verem bem os 5 quadrados em linha
             if upgraded_shot:
-                offset_dist = i * 50  # distância entre cada bala
+                offset_dist = i * 25  # quanto maior, mais espaçadas ficam
                 bx = sx + int(aim.x * offset_dist)
                 by = sy + int(aim.y * offset_dist)
             else:
@@ -803,7 +857,11 @@ class Game:
                 except Exception:
                     pass
 
-            self.projectiles.append(proj)
+            # regista no gestor de projécteis (e a lista local aponta para o mesmo)
+            if self.projectile_manager:
+                self.projectile_manager.add_player_projectile(proj)
+            else:
+                self.projectiles.append(proj)
 
         # 2.5) Consumir munição do upgrade e voltar à arma base quando acabar
         if upgraded_shot:
@@ -826,9 +884,9 @@ class Game:
         self.shoot_pressed = True
         self.last_shot_time = now
 
-    # -----------------------------
+    # ----------------------------- #
     # GRANADAS
-    # -----------------------------
+    # ----------------------------- #
     def handle_player_granade(self):
         if not self.player:
             return
@@ -941,9 +999,9 @@ class Game:
                     # Som de morte de inimigo
                     self.sound.play_enemy_death()
 
-    # -----------------------------
+    # ----------------------------- #
     # DRAW HELPERS
-    # -----------------------------
+    # ----------------------------- #
     def draw_scene(self):
         """Desenha cenário, inimigos, jogador, projécteis, granadas e textos flutuantes."""
         self.screen.fill((0, 0, 0))
@@ -1079,9 +1137,9 @@ class Game:
                 (x, y, bar_width * hp_ratio, bar_height),
             )
 
-    # -----------------------------
+    # ----------------------------- #
     # LOOP GLOBAL
-    # -----------------------------
+    # ----------------------------- #
     def run(self):
         """Loop global de jogo: delega tudo na cena actual."""
         while self.running:
@@ -1100,9 +1158,9 @@ class Game:
             self.clock.tick(config.FPS)
 
 
-# -----------------------------
+# ----------------------------- #
 # CENA DE JOGO (LEVEL)
-# -----------------------------
+# ----------------------------- #
 class LevelScene(Scene):
     """
     Cena que trata do jogo em si (nível actual).
@@ -1136,7 +1194,6 @@ class LevelScene(Scene):
                     game.change_scene(PauseMenu(game, previous_scene=self))
                     return
 
-
             # Timer do relógio
             if game.game_state and event.type == game.game_state.timer_event:
                 if not game.infinite_time:
@@ -1144,8 +1201,9 @@ class LevelScene(Scene):
 
     def update(self, dt: float):
         game = self.game
+        dt_seconds = dt / 1000.0 if dt else 0.0
 
-    # ----------------- CONDIÇÕES DE FIM DE NÍVEL -----------------
+        # ----------------- CONDIÇÕES DE FIM DE NÍVEL -----------------
         timeout = (
             game.game_state
             and game.game_state.time_left <= 0
@@ -1198,21 +1256,17 @@ class LevelScene(Scene):
 
         # --- UPDATE PICKUPS ---
         if game.pickup_manager:
-            dt_seconds = dt / 1000.0 if dt else 0.0
             player_rect = game.player.rect if game.player else None
             pickup_events = game.pickup_manager.update(
                 dt_seconds,
                 player_rect=player_rect,
             )
             for ev in pickup_events:
-                # ev é um PickupEffectEvent
                 game.apply_pickup_effect(ev.effect)
 
         # --- UPDATE PROJÉCTEIS ---
-        for proj in game.projectiles + game.enemy_projectiles:
-            if proj:
-                proj.update()
-
+        if game.projectile_manager:
+            game.projectile_manager.update(dt_seconds)
 
         # --- UPDATE GRANADAS ---
         game.update_granades(dt)
@@ -1249,4 +1303,3 @@ class LevelScene(Scene):
 
 if __name__ == "__main__":
     Game().run()
-

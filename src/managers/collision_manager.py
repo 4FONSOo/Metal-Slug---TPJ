@@ -8,7 +8,6 @@ Objectivo:
       * inimigos
       * projécteis do player
       * projécteis dos inimigos
-      * (opcional) granadas / explosões
   - NÃO depende de pygame/pg_engine.
   - Não aplica danos directamente. Só devolve “eventos de colisão”.
     O Game/Scene é que decide o que fazer (HP--, score++, etc.).
