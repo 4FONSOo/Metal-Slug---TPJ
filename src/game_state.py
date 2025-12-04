@@ -161,6 +161,11 @@ class Game:
         self.last_shot_time = 0
         self.aim_dir = Vector2(1, 0)
 
+        # Upgrade de arma (pickup WEAPON_UP)
+        self.weapon_upgrade_active = False
+        self.weapon_upgrade_shots_left = 0
+        self.weapon_fire_rate_multiplier = 1.0
+
         # Fogo secundário (granada)
         self.granade_pressed = False
 
@@ -308,6 +313,14 @@ class Game:
         if self.pickup_manager:
             self.pickup_manager.clear()
         self.pickup_manager = None
+
+        # Reset do estado de upgrade de arma
+        self.weapon_upgrade_active = False
+        self.weapon_upgrade_shots_left = 0
+        self.weapon_upgrade_stacks = 0
+        self.weapon_fire_rate_multiplier = 1.0
+        self.weapon_damage_multiplier = 1.0
+
         self.shoot_pressed = False
         self.granade_pressed = False
         try:
@@ -504,6 +517,12 @@ class Game:
         if gs and isinstance(time_delta, (int, float)):
             gs.time_left = max(0, gs.time_left + int(time_delta))
 
+        # ---------------- UPGRADE DE ARMA ----------------
+        if kind == "weapon_up":
+            ammo = int(effect.get("ammo", 0) or 0)
+            mult = float(effect.get("fire_rate_multiplier", 1.0) or 1.0)
+            self.activate_weapon_upgrade(ammo, mult)
+
         # ---------------- NUKE / bomba total ----------------
         if effect.get("nuke") or kind in ("nuke", "bomb", "kill_all"):
             for enemy in self.enemies:
@@ -528,6 +547,38 @@ class Game:
                 self.sound.play_sfx("pickup")
             except Exception:
                 pass
+
+    def activate_weapon_upgrade(self, ammo: int, fire_rate_multiplier: float) -> None:
+        """Activa/empilha o upgrade de arma (pickup WEAPON_UP)."""
+        ammo = max(0, int(ammo or 0))
+        if ammo <= 0:
+            return
+
+        max_stacks = getattr(config, "WEAPON_UPGRADE_MAX_STACKS", 3)
+
+        if not getattr(self, "weapon_upgrade_active", False):
+            # Primeira vez: activa upgrade
+            self.weapon_upgrade_active = True
+            self.weapon_upgrade_shots_left = ammo
+            self.weapon_upgrade_stacks = 1
+        else:
+            # Já tinha upgrade activo
+            if self.weapon_upgrade_stacks < max_stacks:
+                # Pode empilhar efeito até ao limite
+                self.weapon_upgrade_stacks += 1
+                self.weapon_upgrade_shots_left += ammo
+            else:
+                # Já está no máximo → só munição bónus (2x ammo base)
+                self.weapon_upgrade_shots_left += ammo * 2
+
+        # Recalcular multiplicadores com base no nº de stacks
+        stacks = max(1, self.weapon_upgrade_stacks)
+        base_fire_mult = float(fire_rate_multiplier or 1.0)
+        base_dmg_mult = getattr(config, "WEAPON_UPGRADE_DAMAGE_MULTIPLIER", 1.0)
+
+        # Multiplicador acumulado: base^stacks
+        self.weapon_fire_rate_multiplier = base_fire_mult ** stacks
+        self.weapon_damage_multiplier = base_dmg_mult ** stacks         
 
     def try_melee_attack(self) -> bool:
         """Tenta ataque melee (faca). Se matar alguém, dá pontos e texto flutuante."""
@@ -644,17 +695,33 @@ class Game:
 
         now = pg.time_get_ticks()
 
-        # Cadência de tiro (auto-fire)
-        if self.shoot_pressed and (now - self.last_shot_time) < config.PLAYER_FIRE_INTERVAL_MS:
+        # Cadência de tiro base
+        interval_ms = config.PLAYER_FIRE_INTERVAL_MS
+        if self.weapon_upgrade_active and self.weapon_upgrade_shots_left > 0:
+            # Upgrade mexe no intervalo
+            interval_ms = int(interval_ms * self.weapon_fire_rate_multiplier)
+
+        # Rate limit global (melee + tiro)
+        if (now - self.last_shot_time) < interval_ms:
             return
 
-        # 1) Primeiro tenta melee (faca)
+        # Detectar “tecla acabou de ser carregada” (para não haver disparo contínuo)
+        just_pressed = not self.shoot_pressed
+        upgraded_on = self.weapon_upgrade_active and self.weapon_upgrade_shots_left > 0
+
+        # 1) Primeiro tenta melee (pode repetir enquanto mantém a tecla, respeitando o intervalo)
         if self.try_melee_attack():
             self.shoot_pressed = True
             self.last_shot_time = now
             return
 
-        # 2) Direção "desejada" com base nas teclas (discreta)
+        # 2) Pistola base só dispara quando a tecla é *acabada* de carregar;
+        #    com upgrade activo, permite disparo contínuo (desde que respeite o intervalo).
+        if not upgraded_on and not just_pressed:
+            self.shoot_pressed = True
+            return
+
+        # 2.1) Direção "desejada" com base nas teclas (discreta)
         raw_dx, raw_dy = get_shoot_direction(
             keys,
             facing=self.player.facing,
@@ -682,7 +749,7 @@ class Game:
 
         aim = self.aim_dir.normalize()
 
-        # 3) Calcular posição de spawn (usa direcção discreta para offsets)
+        # 2.2) Calcular posição de spawn (usa direcção discreta para offsets)
         cx = self.player.rect.centerx
         cy = self.player.rect.centery
 
@@ -697,19 +764,65 @@ class Game:
             sx = cx + raw_dx * config.PLAYER_PROJECTILE_OFFSET_X
             sy = cy - config.PLAYER_PROJECTILE_OFFSET_Y
 
-        # 4) Criar projéctil com direção de mira suavizada (aim.x, aim.y)
-        self.projectiles.append(
-            Projectile(
-                sx,
-                sy,
+        # 2.3) Definir se é tiro melhorado e quantas balas dispara
+        upgraded_shot = self.weapon_upgrade_active and self.weapon_upgrade_shots_left > 0
+        bullets_to_fire = 1
+        if upgraded_shot:
+            # Um toque dispara até 5 balas, limitado pela munição restante
+            bullets_to_fire = min(5, self.weapon_upgrade_shots_left)
+
+        projectile_color = config.PLAYER_PROJECTILE_COLOR
+        if upgraded_shot:
+            projectile_color = (0, 0, 0)  # tiro melhorado: bola preta
+
+        # 2.4) Criar projécteis
+        for i in range(bullets_to_fire):
+            # No upgrade, dá offset para se verem 5 quadrados distintos
+            if upgraded_shot:
+                offset_dist = i * 50  # distância entre cada bala
+                bx = sx + int(aim.x * offset_dist)
+                by = sy + int(aim.y * offset_dist)
+            else:
+                bx, by = sx, sy
+
+            proj = Projectile(
+                bx,
+                by,
                 aim.x,
                 aim.y,
                 max_range=self.bg_width,
-                color=config.PLAYER_PROJECTILE_COLOR,
+                color=projectile_color,
             )
-        )
 
-        self.sound.play_shot()
+            if upgraded_shot:
+                # aumentar dano e tamanho da "bola" do tiro melhorado
+                base_damage = getattr(proj, "damage", 1)
+                proj.damage = base_damage * self.weapon_damage_multiplier
+                try:
+                    proj.rect.inflate_ip(4, 4)
+                except Exception:
+                    pass
+
+            self.projectiles.append(proj)
+
+        # 2.5) Consumir munição do upgrade e voltar à arma base quando acabar
+        if upgraded_shot:
+            self.weapon_upgrade_shots_left -= bullets_to_fire
+            if self.weapon_upgrade_shots_left <= 0:
+                self.weapon_upgrade_active = False
+                self.weapon_upgrade_stacks = 0
+                self.weapon_fire_rate_multiplier = 1.0
+                self.weapon_damage_multiplier = 1.0
+
+        # 2.6) Som: tiro1 = arma base, tiro2 = upgrade
+        try:
+            if upgraded_shot:
+                self.sound.play_sfx("tiro2.mp3")
+            else:
+                self.sound.play_sfx("tiro1.mp3")
+        except Exception:
+            pass
+
         self.shoot_pressed = True
         self.last_shot_time = now
 
@@ -915,11 +1028,19 @@ class Game:
 
             granades_str = f"   G:{g_value}"
 
+        ammo_str = ""
+        if hasattr(self, "weapon_upgrade_active"):
+            if self.weapon_upgrade_active and self.weapon_upgrade_shots_left > 0:
+                ammo_value = str(self.weapon_upgrade_shots_left)
+            else:
+                ammo_value = "∞"
+            ammo_str = f"   B:{ammo_value}"
+
         top_text = (
             f"Pontuação: {score_value}   "
             f"Tempo: {tempo_str}   "
             f"Dif: {self.difficulty}"
-            f"{granades_str}"
+            f"{granades_str}{ammo_str}"
         )
         draw_text_with_outline(
             self.screen,
