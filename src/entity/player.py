@@ -13,7 +13,7 @@ from config import (
     PLAYER_START_GRANADES,
     HEIGHT,
 )
-from input_manager import get_move_axis
+from managers.input_manager import get_move_axis
 import controls
 from resource import load_player_sprites
 
