@@ -178,16 +178,17 @@ PICKUP_MAX_ACTIVE = 5
 PICKUP_LIFETIME_SECONDS = 10.0
 
 # Probabilidades (%). Devem somar 100.
-# 30% Vida Up
-PICKUP_PROB_HP_UP = 0
-# 30% Vida Down
-PICKUP_PROB_HP_DOWN = 0
-# 20% Granadas
-PICKUP_PROB_GRENADES = 0
-# 15% Upgrade de rifle
-PICKUP_PROB_WEAPON_UP = 100
-# 5% Nuke
-PICKUP_PROB_NUKE = 0
+
+# base 30% Vida Up
+PICKUP_PROB_HP_UP = 30
+# base 30% Vida Down
+PICKUP_PROB_HP_DOWN = 30
+# base 20% Granadas
+PICKUP_PROB_GRENADES = 20
+# base 15% Upgrade de rifle
+PICKUP_PROB_WEAPON_UP = 15
+# base 5% Nuke
+PICKUP_PROB_NUKE = 5
 
 # Efeitos numéricos dos pickups
 
