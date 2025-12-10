@@ -208,7 +208,7 @@ HP_DOWN_AMOUNT = 200
 # -----------------------------
 # CHEATS
 # -----------------------------
-CHEAT_CODES = ["GOD", "TIME", "SPJ", "GRN"]
+CHEAT_CODES = ["GOD", "TIME", "SPJ", "GRN", "TTT"]
 
 CHEAT_SUPER_JUMP_VALUE = -35
 CHEAT_NORMAL_JUMP_VALUE = -12

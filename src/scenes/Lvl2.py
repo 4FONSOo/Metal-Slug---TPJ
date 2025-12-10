@@ -7,10 +7,10 @@ from config import ASSETS_DIR, HEIGHT
 
 def load_level():
     """
-    Carrega o nível 1 a partir de um ficheiro TMX do Tiled.
+    Carrega o nível 2 a partir de um ficheiro TMX do Tiled.
     """
 
-    tmx_path = os.path.join(ASSETS_DIR, "background", "Lvl1.tmx")
+    tmx_path = os.path.join(ASSETS_DIR, "background", "Lvl2.tmx")
     if not os.path.isfile(tmx_path):
         raise FileNotFoundError(f"[Erro] Mapa TMX não encontrado: {tmx_path}")
 
@@ -47,12 +47,14 @@ def load_level():
             )
             platforms.append(rect)
     else:
-        print("[Lvl1] Aviso: Sem colisões!!! (layer 'Mapa_Col' em falta)")
+        print("[Lvl2] Aviso: Sem colisões!!! (layer 'Mapa_Col' em falta)")
 
     return {
         "background": background,
         "bg_width": new_width,
         "bg_height": new_height,
         "platforms": platforms,
-        "level_id": 1,
+        "level_id": 2,
+        "has_boss": True,          
+        "enemy_density": "chaotic"
     }

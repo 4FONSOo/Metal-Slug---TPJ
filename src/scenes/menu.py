@@ -60,6 +60,12 @@ class Menu(Scene):
                 sys.exit()
 
             elif event.type == pg.KEYDOWN:
+                # Primeiro: tentar cheats (TROCA, GOD, etc.)
+                cheat_consumed = self.game.process_cheats(event)
+                if cheat_consumed:
+                    # Letra foi usada para um cheat → não mexe no menu
+                    continue
+
                 if event.key == pg.K_UP:
                     self.selected = (self.selected - 1) % len(self.options)
                 elif event.key == pg.K_DOWN:

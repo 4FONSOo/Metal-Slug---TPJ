@@ -45,10 +45,20 @@ from entity.enemy import (
     EnemyHeavy,
     EnemyFast,
 )
+
+from entity.boss import Boss
+
 from entity.projectile import Projectile
 from entity.granade import Granade  # lógica da granada
 
-from scenes.Lvl1 import load_level
+from scenes.Lvl1 import load_level as load_level_1
+from scenes.Lvl2 import load_level as load_level_2
+
+LEVEL_LOADERS = [
+    load_level_1,  # índice 0 → Lvl1
+    load_level_2,  # índice 1 → Lvl2
+]
+
 from scenes.menu import Menu as MenuScene  # cena de menu principal
 
 from sound import SoundManager
@@ -163,6 +173,9 @@ class Game:
         self.background = None
         self.bg_width = config.WIDTH
         self.platforms: list[pg.Rect] = []
+        self.current_level_id: int = 1
+
+        #self.debug_level_index = 0  # cheat TTT
 
         # Jogador / inimigos / projécteis
         self.player_choice = "player1"
@@ -174,6 +187,10 @@ class Game:
         self.granades: list[Granade] = []                # granadas do jogador
         self.floating_texts: list[FloatingText] = []
 
+        # Boss de nível (ex: helicóptero)
+        self.boss: Boss | None = None
+        self.has_boss: bool = False
+
         # Gestor de projécteis
         self.projectile_manager: ProjectileManager | None = None
 
@@ -182,6 +199,14 @@ class Game:
 
         # Gestor de combate (input → eventos de tiro/melee/granada)
         self.combat_manager: CombatManager | None = None
+
+        
+        #isto vai sair
+        
+        self.camera_shake_time = 0.0
+        self.camera_shake_intensity = 0.0
+        self.camera_shake_offset_x = 0
+
 
         # Efeitos (flash, NUKE, slow-motion)
         self.effects = EffectsManager()
@@ -209,12 +234,17 @@ class Game:
         # Estado lógico (score / tempo / etc.)
         self.game_state: GameState | None = None
 
+        # Debug Only: Troca entre o Lvl1 e Lvl2 (posso complicar, mas............)
+        self.debug_start_level = 1
+
         # Cheats
         self.cheat_engine = CheatEngine(CHEAT_CODES)
         self.god_mode = False
         self.infinite_time = False
         self.infinite_granades = False
         self.super_jump = False
+
+        self.debug_level_index = 0
 
         # Começamos no menu principal
         self.change_scene(MenuScene(self))
@@ -254,12 +284,18 @@ class Game:
         max_spawns = preset.get(
             "ENEMY_MAX_SPAWNS",
             config.ENEMY_MANAGER_MAX_SPAWNS_DEFAULT,
-        )
+        )      
         max_active = preset.get(
             "ENEMY_MAX_ACTIVE",
             config.ENEMY_MANAGER_MAX_ACTIVE_DEFAULT,
         )
         damage_multiplier = preset.get("ENEMY_DAMAGE_MULTIPLIER", 1.0)
+
+        # Se o nível for “caótico”, quadruplicar nº de inimigos
+        if getattr(self, "enemy_density", "normal") == "chaotic":
+            max_spawns *= 4
+            max_active *= 4
+
         return max_spawns, max_active, damage_multiplier
 
     # ----------------------------- #
@@ -267,26 +303,129 @@ class Game:
     # ----------------------------- #
     def flash(self, color, frames=None):
         """
-        Flash de ecrã via EffectsManager (mantendo API antiga baseada em frames).
+        Flash de ecrã via EffectsManager (usado pelos cheats e NUKE).
+        Mantém compatibilidade com a API antiga baseada em 'frames'.
         """
-        if not self.effects:
+        if not getattr(self, "effects", None):
             return
 
         if frames is None:
-            frames = config.SCREEN_FLASH_DEFAULT_FRAMES
+            # nº de frames padrão (por ex. 10); cai para 10 se não existir na config
+            frames = getattr(config, "SCREEN_FLASH_DEFAULT_FRAMES", 10)
 
         try:
             duration = max(0.0, float(frames)) / float(config.FPS)
         except Exception:
-            duration = config.SCREEN_FLASH_DEFAULT_FRAMES / 60.0
+            # fallback seguro
+            duration = frames / 60.0
 
         # Fade linear durante a duração toda
-        self.effects.trigger_flash(color=color, duration=duration, fade_time=duration)
+        self.effects.trigger_flash(
+            color=color,
+            duration=duration,
+            fade_time=duration,
+        )
+    
+    
+    def trigger_camera_shake(self, duration: float, intensity: float = 6.0) -> None:
+        """
+        Activa/renova um efeito de tremor de câmara.
+
+        duration: segundos
+        intensity: nº máximo de píxeis de deslocamento horizontal.
+        """
+        try:
+            duration = float(duration)
+            intensity = float(intensity)
+        except Exception:
+            return
+
+        if duration <= 0.0 or intensity <= 0.0:
+            return
+
+        # Se já houver shake activo, fica com o mais longo/forte
+        self.camera_shake_time = max(self.camera_shake_time, duration)
+        self.camera_shake_intensity = max(self.camera_shake_intensity, intensity)
+
+    def _update_camera_shake(self, dt_seconds: float) -> None:
+        """Actualiza offsets de tremor de câmara."""
+        if self.camera_shake_time <= 0.0:
+            self.camera_shake_time = 0.0
+            self.camera_shake_offset_x = 0
+            return
+
+        self.camera_shake_time -= dt_seconds
+        if self.camera_shake_time <= 0.0:
+            self.camera_shake_time = 0.0
+            self.camera_shake_offset_x = 0
+            return
+
+        max_off = int(self.camera_shake_intensity)
+        if max_off <= 0:
+            self.camera_shake_offset_x = 0
+            return
+
+        # Tremor horizontal aleatório
+        self.camera_shake_offset_x = random.randint(-max_off, max_off)
 
     # ----------------------------- #
+    # BOSS
+    # ----------------------------- #
+    def maybe_spawn_boss(self) -> None:
+        """Cria o boss quando o player chega a ~85% do nível."""
+        if not self.has_boss:
+            return
+        if self.boss is not None:
+            return
+        if not self.player or self.bg_width <= 0:
+            return
+
+        progress = self.player.rect.centerx / float(self.bg_width)
+        if progress < 0.85:
+            return
+
+        # Sprite do boss (guardaste boss.png em assets/enemy)
+        img = load_enemy(
+            getattr(config, "BOSS_WIDTH", 160),
+            getattr(config, "BOSS_HEIGHT", 120),
+            "boss.png",
+        )
+
+        # Spawn um bocado à frente do player mas dentro do nível
+        spawn_x = self.player.rect.centerx + config.WIDTH // 3
+        spawn_x = max(0, min(self.bg_width - img.get_width(), spawn_x))
+
+        start_y = -img.get_height()
+        target_y = int(config.HEIGHT * getattr(config, "BOSS_TARGET_Y_RATIO", 0.15))
+
+        self.boss = Boss(img, spawn_x, start_y, target_y)
+
+    def update_boss(self, dt_seconds: float) -> None:
+        """Actualiza boss + garante que entra nas listas de colisão/desenho."""
+        if not self.has_boss:
+            return
+
+        # Spawna se ainda não existir
+        self.maybe_spawn_boss()
+
+        boss = self.boss
+        if not boss or not getattr(boss, "alive", False):
+            # (Mais tarde podemos tratar aqui do fim de nível ao matar o boss)
+            return
+
+        # Movimento / AI / tiros
+        boss.update(dt_seconds, self)
+
+        # Garante que é considerado para colisões / melee / granadas
+        if boss not in self.enemies:
+            self.enemies.append(boss)
+
+
+  # ----------------------------- #
     # CHEATS
     # ----------------------------- #
     def process_cheats(self, event) -> bool:
+        """Processa letras para códigos de cheat. Devolve True se consumiu a tecla."""
         if event.type != pg.KEYDOWN:
             return False
 
@@ -294,8 +433,15 @@ class Game:
         if not key_name or len(key_name) != 1:
             return False
 
+        # Normalizar para 1 letra (A-Z)
+        key_name = key_name.upper()
+        if not key_name.isalpha():
+            return False
+
         consumed, activations = self.cheat_engine.process_char(key_name)
+
         for code, active in activations:
+            # GOD MODE
             if code == "GOD":
                 self.god_mode = active
                 self.flash(
@@ -303,6 +449,8 @@ class Game:
                     if active
                     else config.CHEAT_FLASH_COLOR_GOD_OFF
                 )
+
+            # TEMPO INFINITO
             elif code == "TIME":
                 self.infinite_time = active
                 self.flash(
@@ -310,6 +458,8 @@ class Game:
                     if active
                     else config.CHEAT_FLASH_COLOR_TIME_OFF
                 )
+
+            # SUPER JUMP
             elif code == "SPJ":
                 self.super_jump = active
                 self.flash(
@@ -323,6 +473,8 @@ class Game:
                         if active
                         else config.CHEAT_NORMAL_JUMP_VALUE
                     )
+
+            # GRANADAS INFINITAS
             elif code == "GRN":
                 self.infinite_granades = active
                 self.flash(
@@ -331,7 +483,7 @@ class Game:
                     else config.CHEAT_FLASH_COLOR_GRN_OFF
                 )
 
-                # Actualizar CombatManager e garantir pelo menos 1 granada lógica
+                # Actualizar CombatManager e garantir pelo menos 1 granada
                 if self.combat_manager:
                     self.combat_manager.enable_infinite_grenades(active)
                     try:
@@ -342,6 +494,47 @@ class Game:
 
                 if active and self.player and getattr(self.player, "granades", 0) <= 0:
                     self.player.granades = 1
+
+            # TROCA – muda o nível inicial (só no Menu)
+            elif code == "TROCA":
+                # Só funciona no menu principal
+                if not isinstance(self.current_scene, MenuScene):
+                    continue
+
+                # Nº máximo de níveis de debug (ajusta aqui se adicionares mais)
+                max_levels = getattr(config, "DEBUG_MAX_LEVELS", 2)
+                try:
+                    max_levels = int(max_levels)
+                except Exception:
+                    max_levels = 2
+                if max_levels < 1:
+                    max_levels = 1
+
+                if self.debug_level_index < max_levels - 1:
+                    # Avança para o próximo nível de debug
+                    self.debug_level_index += 1
+                    try:
+                        color = getattr(
+                            config,
+                            "CHEAT_FLASH_COLOR_TROCA",
+                            (100, 255, 100),
+                        )
+                        self.flash(color)
+                    except Exception:
+                        pass
+
+                    print(
+                        f"[CHEAT] Próximo jogo começa no nível "
+                        f"{self.debug_level_index + 1}/{max_levels}"
+                    )
+                else:
+                    # Já não há mais níveis → ecrã “CHEATER, no more levels”
+                    if hasattr(self, "show_no_more_levels"):
+                        self.show_no_more_levels()
+                    else:
+                        # fallback seguro: reset evitar crash
+                        self.debug_level_index = 0
+                        print("[CHEAT] No more levels → reset para nível 1")
 
         return consumed
 
@@ -362,8 +555,12 @@ class Game:
 
         self.player = None
 
+        self.boss = None
+        self.has_boss = False
+
         if self.enemy_manager:
             self.enemy_manager.clear()
+        
         self.enemy_manager = None
         self.enemies.clear()
 
@@ -428,7 +625,86 @@ class Game:
 
         # Reset do estado e voltar ao menu
         self.reset_all_state()
+
+        #DEBUG DE NÍVEL
+
         self.change_scene(MenuScene(self))
+
+    def show_no_more_levels(self):
+        """
+        Ecrã de debug quando o cheat TROCA tenta ir para além do último nível.
+
+        Mostra:
+          CHEATER
+          no more levels
+
+        ENTER: volta ao menu com o nível 1 seleccionado.
+        """
+        big_font = pg.create_font(
+            getattr(config, "MENU_FONT_NAME", config.HUD_FONT_NAME),
+            72,
+        )
+        small_font = pg.create_font(
+            getattr(config, "MENU_OPTIONS_FONT_NAME", config.HUD_FONT_NAME),
+            26,
+        )
+
+        title_surf = pg.render_text(big_font, "CHEATER", (255, 50, 50))
+        msg_surf = pg.render_text(big_font, "no more levels", (255, 255, 255))
+        hint_surf = pg.render_text(
+            small_font,
+            "ENTER: voltar ao nível 1",
+            (200, 200, 200),
+        )
+
+        # Pequeno flash só para reforçar que foi um cheat
+        try:
+            self.flash((255, 50, 50))
+        except Exception:
+            pass
+
+        while True:
+            for event in pg.get_events():
+                if event.type == pg.QUIT:
+                    try:
+                        self.sound.stop_music()
+                    except Exception:
+                        pass
+                    pg.quit()
+                    sys.exit()
+                elif event.type == pg.KEYDOWN and event.key == pg.K_RETURN:
+                    # Reset lógico para o primeiro nível
+                    self.debug_level_index = 0
+                    print("[CHEAT] Reset para nível 1 após 'no more levels'")
+                    return
+
+            self.screen.fill((0, 0, 0))
+
+            self.screen.blit(
+                title_surf,
+                (
+                    config.WIDTH // 2 - title_surf.get_width() // 2,
+                    config.HEIGHT // 2 - 150,
+                ),
+            )
+            self.screen.blit(
+                msg_surf,
+                (
+                    config.WIDTH // 2 - msg_surf.get_width() // 2,
+                    config.HEIGHT // 2 - 40,
+                ),
+            )
+            self.screen.blit(
+                hint_surf,
+                (
+                    config.WIDTH // 2 - hint_surf.get_width() // 2,
+                    config.HEIGHT // 2 + 60,
+                ),
+            )
+
+            pg.display_flip()
+            self.clock.tick(config.FPS)
+
 
     def start_game(self):
         """
@@ -440,11 +716,19 @@ class Game:
         """
         self.reset_all_state()
 
-        # Nível (TMX)
-        self.level = load_level()
+        # Nível (TMX) – escolhe pelo índice de debug
+        max_index = max(0, len(LEVEL_LOADERS) - 1)
+        level_index = max(0, min(self.debug_level_index, max_index))
+        load_fn = LEVEL_LOADERS[level_index]
+
+        self.level = load_fn()
         self.background = self.level["background"]
         self.bg_width = self.level["bg_width"]
         self.platforms = self.level["platforms"]
+        self.current_level_id = int(self.level.get("level_id", 1))
+        self.has_boss = bool(self.level.get("has_boss", False))
+        self.boss = None
+        self.enemy_density = self.level.get("enemy_density", "normal")
 
         # Gestor de pickups (power-ups)
         ground_y = config.HEIGHT
@@ -503,11 +787,24 @@ class Game:
         #  - sprite adequado
         #  - patrol min/max
         #  - plataformas
+        
         def enemy_factory(spawn_x: float, _spawn_y: float) -> Enemy:
             p = random.random()
-            if p < 0.15:
+
+            # Distribuição:
+            #  - nível 1: 15% heavy, 30% shooter, 55% pequenos
+            #  - nível 2: 5% heavy, 10% shooter, 85% pequenos (mais caos de mooks)
+            
+            if getattr(self, "current_level_id", 1) == 2:
+                heavy_thr = 0.05
+                shooter_thr = 0.15
+            else:
+                heavy_thr = 0.15
+                shooter_thr = 0.45
+
+            if p < heavy_thr:
                 cls, sprite = EnemyHeavy, "Rebel3.png"
-            elif p < 0.45:
+            elif p < shooter_thr:
                 cls, sprite = EnemyShooter, "Rebel2.png"
             else:
                 cls, sprite = random.choice(
@@ -1102,8 +1399,12 @@ class Game:
     def draw_scene(self):
         """Desenha cenário, inimigos, jogador, projécteis, granadas e textos flutuantes."""
         self.screen.fill((0, 0, 0))
+
+        # Offset de tremor de câmara (horizontal)
+        shake_x = getattr(self, "camera_shake_offset_x", 0)
+
         if self.background:
-            self.screen.blit(self.background, (-self.POV, 0))
+            self.screen.blit(self.background, (-self.POV + shake_x, 0))
 
         # Pickups
         if self.pickup_manager:
@@ -1112,7 +1413,7 @@ class Game:
                 if not data:
                     continue
 
-                x = int(data.get("x", 0) - self.POV)
+                x = int(data.get("x", 0) - self.POV + shake_x)
                 y = int(data.get("y", 0))
                 w = int(data.get("width", 0))
                 h = int(data.get("height", 0))
@@ -1137,6 +1438,52 @@ class Game:
                 continue
             if hasattr(enemy, "draw"):
                 try:
+                    # POV “virtual” para tremer tudo
+                    enemy.draw(self.screen, self.POV - shake_x)
+                    continue
+                except Exception:
+                    pass
+            img = getattr(enemy, "image", None)
+            rect = getattr(enemy, "rect", None)
+            if img is not None and rect is not None:
+                self.screen.blit(img, (rect.x - self.POV + shake_x, rect.y))
+
+        # Jogador
+        if self.player:
+            self.screen.blit(
+                self.player.image,
+                (self.player.rect.x - self.POV + shake_x, self.player.rect.y),
+            )
+
+        # Projécteis
+        for proj in self.projectiles + self.enemy_projectiles:
+            if proj:
+                # Mesma ideia: POV ajustado
+                proj.draw(self.screen, self.POV - shake_x)
+
+        # Granadas
+        for g in self.granades:
+            data = g.get_draw_data()
+            if not data:
+                continue
+
+            x = int(data["x"] - self.POV + shake_x)
+            y = int(data["y"])
+            radius = int(data["radius"])
+
+            color = (255, 80, 80) if data["exploding"] else (255, 0, 0)
+            pg.draw_circle(self.screen, color, (x, y), radius)
+
+        for text in self.floating_texts:
+            text.draw(self.screen, self.POV - shake_x)
+
+
+        # Inimigos
+        for enemy in self.enemies:
+            if not enemy:
+                continue
+            if hasattr(enemy, "draw"):
+                try:
                     enemy.draw(self.screen, self.POV)
                     continue
                 except Exception:
@@ -1145,6 +1492,30 @@ class Game:
             rect = getattr(enemy, "rect", None)
             if img is not None and rect is not None:
                 self.screen.blit(img, (rect.x - self.POV, rect.y))
+
+        # Boss (sprite única, se existir)
+        if getattr(self, "boss", None):
+            boss = self.boss
+            img = getattr(boss, "image", None)
+            rect = getattr(boss, "rect", None)
+            if img is not None and rect is not None:
+                if hasattr(boss, "draw"):
+                    try:
+                        boss.draw(self.screen, self.POV)
+                    except Exception:
+                        self.screen.blit(img, (rect.x - self.POV, rect.y))
+                else:
+                    self.screen.blit(img, (rect.x - self.POV, rect.y))
+
+        # Boss
+        if self.boss:
+            try:
+                self.boss.draw(self.screen, self.POV)
+            except Exception:
+                self.screen.blit(
+                    self.boss.image,
+                    (self.boss.rect.x - self.POV, self.boss.rect.y),
+                )
 
         # Jogador
         if self.player:
@@ -1243,6 +1614,30 @@ class Game:
                 (x, y, bar_width * hp_ratio, bar_height),
             )
 
+            # Barra de vida do BOSS
+        boss = getattr(self, "boss", None)
+        if boss and getattr(boss, "alive", False):
+            boss_ratio = boss.hp / boss.max_hp if boss.max_hp > 0 else 0
+
+            bar_width = getattr(config, "HUD_BOSS_HP_BAR_WIDTH", 300)
+            bar_height = getattr(config, "HUD_BOSS_HP_BAR_HEIGHT", 16)
+            x = (config.WIDTH - bar_width) // 2
+            y = getattr(config, "HUD_BOSS_HP_BAR_Y", 40)
+
+            bg_color = getattr(config, "HUD_BOSS_HP_BG_COLOR", (40, 0, 0))
+            bar_color = getattr(config, "HUD_BOSS_HP_COLOR", (220, 40, 40))
+
+            pg.draw_rect(
+                self.screen,
+                bg_color,
+                (x - 2, y - 2, bar_width + 4, bar_height + 4),
+            )
+            pg.draw_rect(
+                self.screen,
+                bar_color,
+                (x, y, bar_width * boss_ratio, bar_height),
+            )            
+
     # ----------------------------- #
     # LOOP GLOBAL
     # ----------------------------- #
@@ -1311,6 +1706,10 @@ class LevelScene(Scene):
         else:
             time_scale = 1.0
 
+        # Tremor de câmara (não depende de slow-motion)
+        if hasattr(game, "_update_camera_shake"):
+            game._update_camera_shake(dt_seconds_raw)
+
         # dt afectado por slow-motion (para lógica de jogo)
         dt_seconds = dt_seconds_raw * time_scale
         dt_ms_scaled = dt * time_scale if dt else 0.0
@@ -1357,6 +1756,9 @@ class LevelScene(Scene):
             game.enemies = game.enemy_manager.get_enemies()
             # projécteis de inimigos: a gestão passa a ser feita directamente
             # (ex: dentro de Enemy usando o ProjectileManager)
+
+        # --- UPDATE BOSS ---
+        game.update_boss(dt_seconds)
 
         # --- UPDATE PICKUPS ---
         if game.pickup_manager:
