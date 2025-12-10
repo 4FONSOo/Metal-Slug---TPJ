@@ -329,23 +329,15 @@ class Game:
     
     def trigger_camera_shake(self, duration: float, intensity: float = 6.0) -> None:
         """
-        Activa/renova um efeito de tremor de câmara.
-
-        duration: segundos
-        intensity: nº máximo de píxeis de deslocamento horizontal.
+        Wrapper para o tremor de câmara no EffectsManager.
         """
+        if not getattr(self, "effects", None):
+            return
+
         try:
-            duration = float(duration)
-            intensity = float(intensity)
+            self.effects.trigger_camera_shake(duration, intensity)
         except Exception:
-            return
-
-        if duration <= 0.0 or intensity <= 0.0:
-            return
-
-        # Se já houver shake activo, fica com o mais longo/forte
-        self.camera_shake_time = max(self.camera_shake_time, duration)
-        self.camera_shake_intensity = max(self.camera_shake_intensity, intensity)
+            pass
 
     def _update_camera_shake(self, dt_seconds: float) -> None:
         """Actualiza offsets de tremor de câmara."""
@@ -705,6 +697,222 @@ class Game:
             pg.display_flip()
             self.clock.tick(config.FPS)
 
+    def show_level_complete_screen(self) -> None:
+        """
+        Ecrã de 'COMPLETE' no fim de um nível.
+        Toca end.mp3 e espera por ENTER antes de continuar.
+        """
+        try:
+            big_font = pg.create_font(
+                getattr(config, "MENU_FONT_NAME", config.HUD_FONT_NAME),
+                72,
+            )
+            small_font = pg.create_font(
+                getattr(config, "MENU_OPTIONS_FONT_NAME", config.HUD_FONT_NAME),
+                26,
+            )
+        except Exception:
+            big_font = self.font
+            small_font = self.font
+
+        title_surf = pg.render_text(big_font, "COMPLETE", (255, 255, 0))
+        hint_surf = pg.render_text(
+            small_font,
+            "ENTER para continuar",
+            (220, 220, 220),
+        )
+
+        # Música de fim de nível
+        try:
+            self.sound.stop_music()
+        except Exception:
+            pass
+
+        # Tentar tocar end.mp3 como música; se falhar, tenta como SFX
+        try:
+            self.sound.play_music("end.mp3")
+        except Exception:
+            try:
+                self.sound.play_sfx("end.mp3")
+            except Exception:
+                pass
+
+        # Loop até ENTER / ESC / SPACE
+        while True:
+            for event in pg.get_events():
+                if event.type == pg.QUIT:
+                    try:
+                        self.sound.stop_music()
+                    except Exception:
+                        pass
+                    pg.quit()
+                    sys.exit()
+                elif event.type == pg.KEYDOWN:
+                    if event.key in (pg.K_RETURN, pg.K_SPACE, pg.K_ESCAPE):
+                        return
+
+            self.screen.fill((0, 0, 0))
+
+            self.screen.blit(
+                title_surf,
+                (
+                    config.WIDTH // 2 - title_surf.get_width() // 2,
+                    config.HEIGHT // 2 - 100,
+                ),
+            )
+            self.screen.blit(
+                hint_surf,
+                (
+                    config.WIDTH // 2 - hint_surf.get_width() // 2,
+                    config.HEIGHT // 2 + 20,
+                ),
+            )
+
+            pg.display_flip()
+            self.clock.tick(config.FPS)
+
+    def show_loading_screen(self, seconds: float = 4.0) -> None:
+        """
+        Ecrã simples de 'Loading...' com barra de progresso.
+        A barra enche ao longo de 'seconds'.
+        """
+        try:
+            font_name = getattr(config, "MENU_FONT_NAME", config.HUD_FONT_NAME)
+            font_size = getattr(config, "MENU_TITLE_FONT_SIZE", 48)
+            font = pg.create_font(font_name, font_size)
+        except Exception:
+            font = self.font
+
+        text_surf = pg.render_text(font, "Loading...", (255, 255, 255))
+
+        total_time = max(0.1, float(seconds))
+        frames = int(total_time * config.FPS)
+
+        # Barra de loading
+        bar_width = int(config.WIDTH * 0.6)
+        bar_height = 20
+        bar_x = (config.WIDTH - bar_width) // 2
+        bar_y = config.HEIGHT // 2 + 40
+
+        for i in range(frames):
+            for event in pg.get_events():
+                if event.type == pg.QUIT:
+                    try:
+                        self.sound.stop_music()
+                    except Exception:
+                        pass
+                    pg.quit()
+                    sys.exit()
+
+            progress = (i + 1) / float(frames)
+
+            self.screen.fill((0, 0, 0))
+
+            # Texto "Loading..."
+            self.screen.blit(
+                text_surf,
+                (
+                    config.WIDTH // 2 - text_surf.get_width() // 2,
+                    config.HEIGHT // 2 - text_surf.get_height() // 2 - 30,
+                ),
+            )
+
+            # Fundo da barra
+            pg.draw_rect(
+                self.screen,
+                (60, 60, 60),
+                (bar_x, bar_y, bar_width, bar_height),
+            )
+
+            # Parte preenchida
+            pg.draw_rect(
+                self.screen,
+                (200, 200, 50),
+                (bar_x, bar_y, int(bar_width * progress), bar_height),
+            )
+
+            pg.display_flip()
+            self.clock.tick(config.FPS)
+
+    def go_to_next_level(self) -> None:
+        """
+        Transição automática para o nível seguinte (usado no fim do Lvl1).
+
+        Mantém pontuação e estado básico do jogador (HP / granadas).
+        """
+        # Índice actual / próximo (debug_level_index 0→1, etc.)
+        max_index = max(0, len(LEVEL_LOADERS) - 1)
+        current_idx = max(0, min(self.debug_level_index, max_index))
+        next_idx = current_idx + 1
+
+        if next_idx > max_index:
+            # Sem mais níveis definidos → trata como "no more levels" / fim de jogo
+            try:
+                self.show_no_more_levels()
+            except Exception:
+                self.handle_game_over()
+            return
+
+        # Guardar estado a manter
+        prev_score = 0
+        if self.game_state:
+            prev_score = self.game_state.score
+        prev_sm_score = (
+            self.score_manager.current_score if self.score_manager else prev_score
+        )
+
+        prev_player_hp = None
+        prev_player_grenades = 0
+        if self.player:
+            prev_player_hp = getattr(self.player, "hp", None)
+            prev_player_grenades = getattr(self.player, "granades", 0)
+
+        prev_cm_grenades = None
+        if self.combat_manager:
+            try:
+                prev_cm_grenades = self.combat_manager.grenades
+            except Exception:
+                prev_cm_grenades = None
+
+        # Avançar para o próximo nível
+        self.debug_level_index = next_idx
+
+        # Ecrã de Loading (bloqueante durante ~4s)
+        self.show_loading_screen(seconds=4.0)
+
+        # Arranca nível seguinte (faz reset completo internamente)
+        self.start_game()
+
+        # Restaurar pontuação
+        if self.game_state:
+            self.game_state.score = prev_score
+        if self.score_manager:
+            self.score_manager.current_score = prev_sm_score
+
+        # Restaurar estado básico do jogador
+        if self.player:
+            if prev_player_hp is not None:
+                # Não deixar passar do novo max_hp
+                try:
+                    self.player.hp = max(
+                        0,
+                        min(int(prev_player_hp), int(self.player.max_hp)),
+                    )
+                except Exception:
+                    self.player.hp = prev_player_hp
+
+            try:
+                self.player.granades = max(0, int(prev_player_grenades))
+            except Exception:
+                pass
+
+        if self.combat_manager and prev_cm_grenades not in (None, float("inf")):
+            try:
+                self.combat_manager.set_grenades(int(prev_cm_grenades))
+            except Exception:
+                pass
+
+
 
     def start_game(self):
         """
@@ -744,10 +952,20 @@ class Game:
         self.projectiles = self.projectile_manager.get_player_projectiles()
         self.enemy_projectiles = self.projectile_manager.get_enemy_projectiles()
 
+        # Música do nível:
+        #   - Lvl1  → theme.mp3
+        #   - Lvl2  → theme2.mp3
         self.sound.stop_music()
-        self.sound.play_music("theme.mp3")
+        try:
+            if level_index == 1 or self.current_level_id == 2:
+                music_file = "theme2.mp3"
+            else:
+                music_file = "theme.mp3"
+            self.sound.play_music(music_file)
+        except Exception:
+            # fallback: tenta sempre a original
+            self.sound.play_music("theme.mp3")
         self.sound.play_level_start()
-
         # Jogador
         max_hp = self._get_player_max_hp_for_difficulty()
         jump_speed = (
@@ -1401,7 +1619,12 @@ class Game:
         self.screen.fill((0, 0, 0))
 
         # Offset de tremor de câmara (horizontal)
-        shake_x = getattr(self, "camera_shake_offset_x", 0)
+        shake_x = 0
+        if self.effects and hasattr(self.effects, "get_camera_shake_offset"):
+            try:
+                shake_x = int(self.effects.get_camera_shake_offset())
+            except Exception:
+                shake_x = 0
 
         if self.background:
             self.screen.blit(self.background, (-self.POV + shake_x, 0))
@@ -1706,10 +1929,6 @@ class LevelScene(Scene):
         else:
             time_scale = 1.0
 
-        # Tremor de câmara (não depende de slow-motion)
-        if hasattr(game, "_update_camera_shake"):
-            game._update_camera_shake(dt_seconds_raw)
-
         # dt afectado por slow-motion (para lógica de jogo)
         dt_seconds = dt_seconds_raw * time_scale
         dt_ms_scaled = dt * time_scale if dt else 0.0
@@ -1782,7 +2001,39 @@ class LevelScene(Scene):
 
         if not isinstance(game.current_scene, LevelScene):
             return
+        
+        # --- FIM DE NÍVEL (Lvl1 → Lvl2) ---
+        # Só fazemos auto-transição quando estamos no 1.º nível
+        # (debug_level_index == 0) e já não há inimigos vivos nem spawns.
+        if (
+            getattr(game, "debug_level_index", 0) == 0
+            and game.enemy_manager is not None
+        ):
+            em = game.enemy_manager
+            try:
+                total_max = em.max_spawns
+                total_spawned = em.total_spawned
+                active_now = em.active_enemies_count
+            except Exception:
+                total_max = 0
+                total_spawned = 0
+                active_now = 0
 
+            if total_max > 0:
+                killed = max(0, total_spawned - active_now)
+                kill_ratio = killed / float(total_max)
+
+                enough_kills = kill_ratio >= 0.60
+                no_active_enemies = active_now == 0
+
+                if enough_kills and no_active_enemies:
+                    # 1) ecrã de COMPLETE (com end.mp3)
+                    # 2) loading com barra
+                    # 3) arranca próximo nível
+                    game.show_level_complete_screen()
+                    game.go_to_next_level()
+                    return
+                
         # --- FLOATING TEXTS ---
         for text in game.floating_texts:
             text.update()

@@ -43,10 +43,10 @@ class Boss:
 
 
         # HP
-        self.max_hp = getattr(config, "BOSS_MAX_HP", 300)
+        self.max_hp = getattr(config, "BOSS_MAX_HP", 5000)
         self.hp = self.max_hp
         self.alive = True
-        self.points = getattr(config, "BOSS_POINTS", 5000)
+        self.points = getattr(config, "BOSS_POINTS", 15000)
 
         # Ataque
         self.damage_multiplier = getattr(config, "BOSS_DAMAGE_MULTIPLIER", 1.5)

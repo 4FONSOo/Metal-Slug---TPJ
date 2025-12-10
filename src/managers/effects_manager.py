@@ -1,4 +1,4 @@
-# effects_manager.py
+# managers/effects_manager.py
 """
 Gestor de efeitos visuais / temporais (FX).
 
@@ -6,17 +6,19 @@ Objectivo:
   - Centralizar efeitos como:
       * flash de ecrã (cheats, NUKE, dano forte)
       * NUKE (flash + slow motion)
-      * futuramente: camera shake, etc.
+      * camera shake
   - Não depende de pygame/pg_engine.
   - Fornece apenas:
-      * update(dt)
-      * query do estado (cor de flash, factor de slow-mo, etc.)
+      * update(dt_seconds)
+      * triggers (flash, nuke, shake)
+      * queries do estado (cor de flash, factor de slow-mo, offset de shake, etc.)
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Optional, Tuple
+import random  # para offsets aleatórios do tremor
 
 
 Color = Tuple[int, int, int]
@@ -39,6 +41,13 @@ class NukeState:
     flash_color: Color = (255, 255, 255)
 
 
+@dataclass
+class CameraShakeState:
+    time_left: float = 0.0       # segundos restantes de shake
+    intensity: float = 0.0       # máximo de píxeis de desvio horizontal
+    offset_x: float = 0.0        # deslocamento actual (x)
+
+
 class EffectsManager:
     """
     Gestor de FX globais.
@@ -46,14 +55,17 @@ class EffectsManager:
     O Game/Scene pode usar:
       - trigger_flash(...)
       - trigger_nuke(...)
+      - trigger_camera_shake(...)
       - update(dt_seconds)
       - get_screen_tint()
       - get_time_scale()
+      - get_camera_shake_offset()
     """
 
     def __init__(self) -> None:
         self._flash = ScreenFlashState()
         self._nuke = NukeState()
+        self._shake = CameraShakeState()  # <- ISTO É O QUE ESTAVA A FALTAR
 
     # ------------------------------------------------------------------ #
     # Triggers
@@ -68,8 +80,8 @@ class EffectsManager:
         """Flash simples de ecrã (cheats, hits fortes, etc.)."""
         self._flash.color = color
         self._flash.intensity = 1.0
-        self._flash.time_left = duration
-        self._flash.fade_time = fade_time
+        self._flash.time_left = max(0.0, float(duration))
+        self._flash.fade_time = max(0.0, float(fade_time))
 
     def trigger_nuke(
         self,
@@ -85,23 +97,60 @@ class EffectsManager:
           - Slow-motion durante alguns segundos
         """
         self._nuke.active = True
-        self._nuke.time_left = total_duration
-        self._nuke.slowmo_factor = slowmo_factor
-        self._nuke.slowmo_time_left = slowmo_duration
+        self._nuke.time_left = max(0.0, float(total_duration))
+        self._nuke.slowmo_factor = float(slowmo_factor)
+        self._nuke.slowmo_time_left = max(0.0, float(slowmo_duration))
         self._nuke.flash_color = flash_color
 
         # Sincronizar com o flash
-        self.trigger_flash(color=flash_color, duration=total_duration, fade_time=total_duration)
+        self.trigger_flash(
+            color=flash_color,
+            duration=self._nuke.time_left,
+            fade_time=self._nuke.time_left,
+        )
+
+    def trigger_camera_shake(self, duration: float, intensity: float = 6.0) -> None:
+        """
+        Activa/renova um efeito de tremor de câmara.
+
+        duration  → segundos
+        intensity → nº máximo de píxeis de deslocamento horizontal
+        """
+        try:
+            duration_f = float(duration)
+            intensity_f = float(intensity)
+        except Exception:
+            return
+
+        if duration_f <= 0.0 or intensity_f <= 0.0:
+            return
+
+        # Se já houver shake activo, fica com o mais longo/forte
+        self._shake.time_left = max(self._shake.time_left, duration_f)
+        self._shake.intensity = max(self._shake.intensity, intensity_f)
 
     # ------------------------------------------------------------------ #
     # Update
     # ------------------------------------------------------------------ #
 
     def update(self, dt_seconds: float) -> None:
-        """Actualiza timers de FX (flash, NUKE, slow-motion, etc.)."""
-        # Flash
+        """Actualiza timers de FX (flash, NUKE, slow-motion, shake, etc.)."""
+        try:
+            dt = float(dt_seconds)
+        except Exception:
+            dt = 0.0
+
+        if dt <= 0.0:
+            # Mesmo com dt=0, convém garantir estados coerentes
+            if self._flash.time_left <= 0.0:
+                self._flash.intensity = 0.0
+            if self._shake.time_left <= 0.0:
+                self._shake.offset_x = 0.0
+            return
+
+        # --- Flash ---
         if self._flash.time_left > 0.0:
-            self._flash.time_left -= dt_seconds
+            self._flash.time_left -= dt
             if self._flash.time_left <= 0.0:
                 self._flash.time_left = 0.0
                 self._flash.intensity = 0.0
@@ -114,17 +163,33 @@ class EffectsManager:
         else:
             self._flash.intensity = 0.0
 
-        # NUKE
+        # --- NUKE / slow-motion ---
         if self._nuke.active:
-            self._nuke.time_left -= dt_seconds
+            self._nuke.time_left -= dt
             if self._nuke.time_left <= 0.0:
                 self._nuke.active = False
                 self._nuke.time_left = 0.0
 
             if self._nuke.slowmo_time_left > 0.0:
-                self._nuke.slowmo_time_left -= dt_seconds
+                self._nuke.slowmo_time_left -= dt
                 if self._nuke.slowmo_time_left <= 0.0:
                     self._nuke.slowmo_time_left = 0.0
+
+        # --- Camera shake ---
+        if self._shake.time_left > 0.0 and self._shake.intensity > 0.0:
+            self._shake.time_left -= dt
+            if self._shake.time_left <= 0.0:
+                self._shake.time_left = 0.0
+                self._shake.offset_x = 0.0
+            else:
+                max_off = int(self._shake.intensity)
+                if max_off > 0:
+                    self._shake.offset_x = random.randint(-max_off, max_off)
+                else:
+                    self._shake.offset_x = 0.0
+        else:
+            self._shake.time_left = 0.0
+            self._shake.offset_x = 0.0
 
     # ------------------------------------------------------------------ #
     # Query
@@ -153,3 +218,9 @@ class EffectsManager:
 
     def is_nuke_active(self) -> bool:
         return self._nuke.active
+
+    def get_camera_shake_offset(self) -> float:
+        """
+        Deslocamento horizontal actual do tremor de câmara (pode ser 0.0).
+        """
+        return self._shake.offset_x
