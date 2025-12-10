@@ -17,7 +17,6 @@ import config
 import controls
 
 from scene import Scene
-from scenes.menu import Menu as MenuSecene, PauseMenu
 from cheats import CheatEngine
 from managers.input_manager import (
     is_fire_pressed,
@@ -36,6 +35,7 @@ from managers.combat_manager import (
 )
 from managers.effects_manager import EffectsManager
 from managers.enemy_manager import EnemyManager, SpawnZone
+from managers.scene_manager import SceneManager
 
 from entity.player import Player
 from entity.enemy import (
@@ -60,6 +60,8 @@ LEVEL_LOADERS = [
 ]
 
 from scenes.menu import Menu as MenuScene  # cena de menu principal
+from scenes.level import LevelScene
+from scenes.flow import NoMoreLevelsScene
 
 from sound import SoundManager
 from config import DIFFICULTY_PRESETS, DEFAULT_DIFFICULTY, CHEAT_CODES
@@ -164,8 +166,8 @@ class Game:
         # Sistema de scores (pontuação actual + highscores)
         self.score_manager = ScoreManager()
 
-        # Cena actual (menu, nível, etc.)
-        self.current_scene: Scene | None = None
+        # Gestor de cenas
+        self.scene_manager = SceneManager(self)
         self.running = True
 
         # Nível / cenário
@@ -199,14 +201,6 @@ class Game:
 
         # Gestor de combate (input → eventos de tiro/melee/granada)
         self.combat_manager: CombatManager | None = None
-
-        
-        #isto vai sair
-        
-        self.camera_shake_time = 0.0
-        self.camera_shake_intensity = 0.0
-        self.camera_shake_offset_x = 0
-
 
         # Efeitos (flash, NUKE, slow-motion)
         self.effects = EffectsManager()
@@ -250,14 +244,24 @@ class Game:
         self.change_scene(MenuScene(self))
 
     # ----------------------------- #
+    # SCENES / SCENE MANAGER
+    # ----------------------------- #
+    @property
+    def current_scene(self) -> Scene | None:
+        """Compat: devolve a cena actual a partir do SceneManager."""
+        return self.scene_manager.current_scene
+
+    @current_scene.setter
+    def current_scene(self, value: Scene | None) -> None:
+        """Compat: permite atribuir current_scene, delegando no SceneManager."""
+        self.scene_manager.current_scene = value    
+
+    # ----------------------------- #
     # GESTÃO DE CENAS
     # ----------------------------- #
     def change_scene(self, new_scene: Scene):
-        """Troca de cena de forma civilizada."""
-        if self.current_scene is not None:
-            self.current_scene.on_exit()
-        self.current_scene = new_scene
-        self.current_scene.on_enter()
+        """Troca de cena de forma civilizada via SceneManager."""
+        self.scene_manager.change_scene(new_scene)
 
     # ----------------------------- #
     # DIFICULDADE
@@ -339,26 +343,6 @@ class Game:
         except Exception:
             pass
 
-    def _update_camera_shake(self, dt_seconds: float) -> None:
-        """Actualiza offsets de tremor de câmara."""
-        if self.camera_shake_time <= 0.0:
-            self.camera_shake_time = 0.0
-            self.camera_shake_offset_x = 0
-            return
-
-        self.camera_shake_time -= dt_seconds
-        if self.camera_shake_time <= 0.0:
-            self.camera_shake_time = 0.0
-            self.camera_shake_offset_x = 0
-            return
-
-        max_off = int(self.camera_shake_intensity)
-        if max_off <= 0:
-            self.camera_shake_offset_x = 0
-            return
-
-        # Tremor horizontal aleatório
-        self.camera_shake_offset_x = random.randint(-max_off, max_off)
 
     # ----------------------------- #
     # BOSS
@@ -495,12 +479,6 @@ class Game:
 
                 # Nº máximo de níveis de debug (ajusta aqui se adicionares mais)
                 max_levels = getattr(config, "DEBUG_MAX_LEVELS", 2)
-                try:
-                    max_levels = int(max_levels)
-                except Exception:
-                    max_levels = 2
-                if max_levels < 1:
-                    max_levels = 1
 
                 if self.debug_level_index < max_levels - 1:
                     # Avança para o próximo nível de debug
@@ -520,13 +498,8 @@ class Game:
                         f"{self.debug_level_index + 1}/{max_levels}"
                     )
                 else:
-                    # Já não há mais níveis → ecrã “CHEATER, no more levels”
-                    if hasattr(self, "show_no_more_levels"):
-                        self.show_no_more_levels()
-                    else:
-                        # fallback seguro: reset evitar crash
-                        self.debug_level_index = 0
-                        print("[CHEAT] No more levels → reset para nível 1")
+                    # Já não há mais níveis → cena “CHEATER, no more levels”
+                    self.change_scene(NoMoreLevelsScene(self))
 
         return consumed
 
@@ -622,223 +595,14 @@ class Game:
 
         self.change_scene(MenuScene(self))
 
-    def show_no_more_levels(self):
-        """
-        Ecrã de debug quando o cheat TROCA tenta ir para além do último nível.
-
-        Mostra:
-          CHEATER
-          no more levels
-
-        ENTER: volta ao menu com o nível 1 seleccionado.
-        """
-        big_font = pg.create_font(
-            getattr(config, "MENU_FONT_NAME", config.HUD_FONT_NAME),
-            72,
-        )
-        small_font = pg.create_font(
-            getattr(config, "MENU_OPTIONS_FONT_NAME", config.HUD_FONT_NAME),
-            26,
-        )
-
-        title_surf = pg.render_text(big_font, "CHEATER", (255, 50, 50))
-        msg_surf = pg.render_text(big_font, "no more levels", (255, 255, 255))
-        hint_surf = pg.render_text(
-            small_font,
-            "ENTER: voltar ao nível 1",
-            (200, 200, 200),
-        )
-
-        # Pequeno flash só para reforçar que foi um cheat
-        try:
-            self.flash((255, 50, 50))
-        except Exception:
-            pass
-
-        while True:
-            for event in pg.get_events():
-                if event.type == pg.QUIT:
-                    try:
-                        self.sound.stop_music()
-                    except Exception:
-                        pass
-                    pg.quit()
-                    sys.exit()
-                elif event.type == pg.KEYDOWN and event.key == pg.K_RETURN:
-                    # Reset lógico para o primeiro nível
-                    self.debug_level_index = 0
-                    print("[CHEAT] Reset para nível 1 após 'no more levels'")
-                    return
-
-            self.screen.fill((0, 0, 0))
-
-            self.screen.blit(
-                title_surf,
-                (
-                    config.WIDTH // 2 - title_surf.get_width() // 2,
-                    config.HEIGHT // 2 - 150,
-                ),
-            )
-            self.screen.blit(
-                msg_surf,
-                (
-                    config.WIDTH // 2 - msg_surf.get_width() // 2,
-                    config.HEIGHT // 2 - 40,
-                ),
-            )
-            self.screen.blit(
-                hint_surf,
-                (
-                    config.WIDTH // 2 - hint_surf.get_width() // 2,
-                    config.HEIGHT // 2 + 60,
-                ),
-            )
-
-            pg.display_flip()
-            self.clock.tick(config.FPS)
-
-    def show_level_complete_screen(self) -> None:
-        """
-        Ecrã de 'COMPLETE' no fim de um nível.
-        Toca end.mp3 e espera por ENTER antes de continuar.
-        """
-        try:
-            big_font = pg.create_font(
-                getattr(config, "MENU_FONT_NAME", config.HUD_FONT_NAME),
-                72,
-            )
-            small_font = pg.create_font(
-                getattr(config, "MENU_OPTIONS_FONT_NAME", config.HUD_FONT_NAME),
-                26,
-            )
-        except Exception:
-            big_font = self.font
-            small_font = self.font
-
-        title_surf = pg.render_text(big_font, "COMPLETE", (255, 255, 0))
-        hint_surf = pg.render_text(
-            small_font,
-            "ENTER para continuar",
-            (220, 220, 220),
-        )
-
-        # Música de fim de nível
-        try:
-            self.sound.stop_music()
-        except Exception:
-            pass
-
-        # Tentar tocar end.mp3 como música; se falhar, tenta como SFX
-        try:
-            self.sound.play_music("end.mp3")
-        except Exception:
-            try:
-                self.sound.play_sfx("end.mp3")
-            except Exception:
-                pass
-
-        # Loop até ENTER / ESC / SPACE
-        while True:
-            for event in pg.get_events():
-                if event.type == pg.QUIT:
-                    try:
-                        self.sound.stop_music()
-                    except Exception:
-                        pass
-                    pg.quit()
-                    sys.exit()
-                elif event.type == pg.KEYDOWN:
-                    if event.key in (pg.K_RETURN, pg.K_SPACE, pg.K_ESCAPE):
-                        return
-
-            self.screen.fill((0, 0, 0))
-
-            self.screen.blit(
-                title_surf,
-                (
-                    config.WIDTH // 2 - title_surf.get_width() // 2,
-                    config.HEIGHT // 2 - 100,
-                ),
-            )
-            self.screen.blit(
-                hint_surf,
-                (
-                    config.WIDTH // 2 - hint_surf.get_width() // 2,
-                    config.HEIGHT // 2 + 20,
-                ),
-            )
-
-            pg.display_flip()
-            self.clock.tick(config.FPS)
-
-    def show_loading_screen(self, seconds: float = 4.0) -> None:
-        """
-        Ecrã simples de 'Loading...' com barra de progresso.
-        A barra enche ao longo de 'seconds'.
-        """
-        try:
-            font_name = getattr(config, "MENU_FONT_NAME", config.HUD_FONT_NAME)
-            font_size = getattr(config, "MENU_TITLE_FONT_SIZE", 48)
-            font = pg.create_font(font_name, font_size)
-        except Exception:
-            font = self.font
-
-        text_surf = pg.render_text(font, "Loading...", (255, 255, 255))
-
-        total_time = max(0.1, float(seconds))
-        frames = int(total_time * config.FPS)
-
-        # Barra de loading
-        bar_width = int(config.WIDTH * 0.6)
-        bar_height = 20
-        bar_x = (config.WIDTH - bar_width) // 2
-        bar_y = config.HEIGHT // 2 + 40
-
-        for i in range(frames):
-            for event in pg.get_events():
-                if event.type == pg.QUIT:
-                    try:
-                        self.sound.stop_music()
-                    except Exception:
-                        pass
-                    pg.quit()
-                    sys.exit()
-
-            progress = (i + 1) / float(frames)
-
-            self.screen.fill((0, 0, 0))
-
-            # Texto "Loading..."
-            self.screen.blit(
-                text_surf,
-                (
-                    config.WIDTH // 2 - text_surf.get_width() // 2,
-                    config.HEIGHT // 2 - text_surf.get_height() // 2 - 30,
-                ),
-            )
-
-            # Fundo da barra
-            pg.draw_rect(
-                self.screen,
-                (60, 60, 60),
-                (bar_x, bar_y, bar_width, bar_height),
-            )
-
-            # Parte preenchida
-            pg.draw_rect(
-                self.screen,
-                (200, 200, 50),
-                (bar_x, bar_y, int(bar_width * progress), bar_height),
-            )
-
-            pg.display_flip()
-            self.clock.tick(config.FPS)
+        
 
     def go_to_next_level(self) -> None:
         """
         Transição automática para o nível seguinte (usado no fim do Lvl1).
 
         Mantém pontuação e estado básico do jogador (HP / granadas).
+        Não mostra ecrãs – isso é tratado pelas Scenes (LevelCompleteScene/LoadingScene).
         """
         # Índice actual / próximo (debug_level_index 0→1, etc.)
         max_index = max(0, len(LEVEL_LOADERS) - 1)
@@ -846,11 +610,8 @@ class Game:
         next_idx = current_idx + 1
 
         if next_idx > max_index:
-            # Sem mais níveis definidos → trata como "no more levels" / fim de jogo
-            try:
-                self.show_no_more_levels()
-            except Exception:
-                self.handle_game_over()
+            # Sem mais níveis definidos → cena "no more levels"
+            self.change_scene(NoMoreLevelsScene(self))
             return
 
         # Guardar estado a manter
@@ -876,9 +637,6 @@ class Game:
 
         # Avançar para o próximo nível
         self.debug_level_index = next_idx
-
-        # Ecrã de Loading (bloqueante durante ~4s)
-        self.show_loading_screen(seconds=4.0)
 
         # Arranca nível seguinte (faz reset completo internamente)
         self.start_game()
@@ -911,8 +669,6 @@ class Game:
                 self.combat_manager.set_grenades(int(prev_cm_grenades))
             except Exception:
                 pass
-
-
 
     def start_game(self):
         """
@@ -1626,8 +1382,13 @@ class Game:
             except Exception:
                 shake_x = 0
 
+        # POV efectivo (já com tremor)
+        camera_x = self.POV - shake_x
+
+        # Background
         if self.background:
-            self.screen.blit(self.background, (-self.POV + shake_x, 0))
+            # lembrar: background é desenhado com -POV
+            self.screen.blit(self.background, (-camera_x, 0))
 
         # Pickups
         if self.pickup_manager:
@@ -1636,7 +1397,7 @@ class Game:
                 if not data:
                     continue
 
-                x = int(data.get("x", 0) - self.POV + shake_x)
+                x = int(data.get("x", 0) - camera_x)
                 y = int(data.get("y", 0))
                 w = int(data.get("width", 0))
                 h = int(data.get("height", 0))
@@ -1659,98 +1420,44 @@ class Game:
         for enemy in self.enemies:
             if not enemy:
                 continue
+
             if hasattr(enemy, "draw"):
                 try:
-                    # POV “virtual” para tremer tudo
-                    enemy.draw(self.screen, self.POV - shake_x)
+                    enemy.draw(self.screen, camera_x)
                     continue
                 except Exception:
                     pass
+
             img = getattr(enemy, "image", None)
             rect = getattr(enemy, "rect", None)
             if img is not None and rect is not None:
-                self.screen.blit(img, (rect.x - self.POV + shake_x, rect.y))
-
-        # Jogador
-        if self.player:
-            self.screen.blit(
-                self.player.image,
-                (self.player.rect.x - self.POV + shake_x, self.player.rect.y),
-            )
-
-        # Projécteis
-        for proj in self.projectiles + self.enemy_projectiles:
-            if proj:
-                # Mesma ideia: POV ajustado
-                proj.draw(self.screen, self.POV - shake_x)
-
-        # Granadas
-        for g in self.granades:
-            data = g.get_draw_data()
-            if not data:
-                continue
-
-            x = int(data["x"] - self.POV + shake_x)
-            y = int(data["y"])
-            radius = int(data["radius"])
-
-            color = (255, 80, 80) if data["exploding"] else (255, 0, 0)
-            pg.draw_circle(self.screen, color, (x, y), radius)
-
-        for text in self.floating_texts:
-            text.draw(self.screen, self.POV - shake_x)
-
-
-        # Inimigos
-        for enemy in self.enemies:
-            if not enemy:
-                continue
-            if hasattr(enemy, "draw"):
-                try:
-                    enemy.draw(self.screen, self.POV)
-                    continue
-                except Exception:
-                    pass
-            img = getattr(enemy, "image", None)
-            rect = getattr(enemy, "rect", None)
-            if img is not None and rect is not None:
-                self.screen.blit(img, (rect.x - self.POV, rect.y))
+                self.screen.blit(img, (rect.x - camera_x, rect.y))
 
         # Boss (sprite única, se existir)
-        if getattr(self, "boss", None):
-            boss = self.boss
+        boss = getattr(self, "boss", None)
+        if boss:
             img = getattr(boss, "image", None)
             rect = getattr(boss, "rect", None)
             if img is not None and rect is not None:
                 if hasattr(boss, "draw"):
                     try:
-                        boss.draw(self.screen, self.POV)
+                        boss.draw(self.screen, camera_x)
                     except Exception:
-                        self.screen.blit(img, (rect.x - self.POV, rect.y))
+                        self.screen.blit(img, (rect.x - camera_x, rect.y))
                 else:
-                    self.screen.blit(img, (rect.x - self.POV, rect.y))
-
-        # Boss
-        if self.boss:
-            try:
-                self.boss.draw(self.screen, self.POV)
-            except Exception:
-                self.screen.blit(
-                    self.boss.image,
-                    (self.boss.rect.x - self.POV, self.boss.rect.y),
-                )
+                    self.screen.blit(img, (rect.x - camera_x, rect.y))
 
         # Jogador
         if self.player:
             self.screen.blit(
                 self.player.image,
-                (self.player.rect.x - self.POV, self.player.rect.y),
+                (self.player.rect.x - camera_x, self.player.rect.y),
             )
 
         # Projécteis
         for proj in self.projectiles + self.enemy_projectiles:
             if proj:
-                proj.draw(self.screen, self.POV)
+                proj.draw(self.screen, camera_x)
 
         # Granadas
         for g in self.granades:
@@ -1758,15 +1465,17 @@ class Game:
             if not data:
                 continue
 
-            x = int(data["x"] - self.POV)
+            x = int(data["x"] - camera_x)
             y = int(data["y"])
             radius = int(data["radius"])
 
             color = (255, 80, 80) if data["exploding"] else (255, 0, 0)
             pg.draw_circle(self.screen, color, (x, y), radius)
 
+        # Floating texts
         for text in self.floating_texts:
-            text.draw(self.screen, self.POV)
+            text.draw(self.screen, camera_x)
+
 
     def draw_hud(self):
         """Desenha HUD: pontuação, tempo, dificuldade, barra de HP."""
@@ -1870,201 +1579,17 @@ class Game:
             events = pg.get_events()
             dt = self.clock.get_time()
 
-            if not self.current_scene:
+            # Se por algum motivo ainda não houver cena, vai para o Menu
+            if not self.scene_manager.current_scene:
                 self.change_scene(MenuScene(self))
 
-            self.current_scene.handle_input(events)
-            self.current_scene.update(dt)
-            self.current_scene.draw(self.screen)
+            # Encaminhar para a cena activa
+            self.scene_manager.handle_input(events)
+            self.scene_manager.update(dt)
+            self.scene_manager.draw(self.screen)
 
             pg.display_flip()
             self.clock.tick(config.FPS)
-
-
-# ----------------------------- #
-# CENA DE JOGO (LEVEL)
-# ----------------------------- #
-class LevelScene(Scene):
-    """
-    Cena que trata do jogo em si (nível actual).
-    """
-
-    def handle_input(self, events: list):
-        game = self.game
-        menu_key = controls.get_key(controls.MENU)
-        pause_key = controls.get_key(controls.PAUSE)
-
-        for event in events:
-            if event.type == pg.QUIT:
-                game.sound.stop_music()
-                pg.quit()
-                sys.exit()
-
-            cheat_consumed = game.process_cheats(event)
-
-            if event.type == pg.KEYDOWN:
-                if event.key == menu_key:
-                    game.reset_all_state()
-                    game.change_scene(MenuScene(game))
-                    return
-
-                if event.key == pause_key and not cheat_consumed:
-                    game.change_scene(PauseMenu(game, previous_scene=self))
-                    return
-
-            if game.game_state and event.type == game.game_state.timer_event:
-                if not game.infinite_time:
-                    game.game_state.update_time()
-
-    def update(self, dt: float):
-        game = self.game
-
-        # dt "real" (antes de slow-motion)
-        dt_seconds_raw = dt / 1000.0 if dt else 0.0
-
-        # Actualizar FX em tempo real
-        if game.effects:
-            game.effects.update(dt_seconds_raw)
-            time_scale = game.effects.get_time_scale()
-        else:
-            time_scale = 1.0
-
-        # dt afectado por slow-motion (para lógica de jogo)
-        dt_seconds = dt_seconds_raw * time_scale
-        dt_ms_scaled = dt * time_scale if dt else 0.0
-
-        # Condição de timeout / fim de nível
-        timeout = (
-            game.game_state
-            and game.game_state.time_left <= 0
-            and not game.infinite_time
-        )
-
-        if timeout:
-            player_alive = bool(game.player and game.player.alive)
-
-            if player_alive:
-                try:
-                    game.sound.play_level_end()
-                except Exception:
-                    pass
-            else:
-                try:
-                    game.sound.play_game_over_sfx()
-                except Exception:
-                    pass
-
-            game.handle_game_over()
-            return
-
-        # Pausa lógica
-        if game.game_state and game.game_state.paused:
-            return
-
-        # --- UPDATE JOGADOR ---
-        keys = pg.get_keys()
-        if game.player:
-            game.player.handle_input(keys)
-            game.player.update_animation(dt_ms_scaled)
-            game.player.apply_gravity()
-            game.handle_combat(dt_seconds)
-
-        # --- UPDATE INIMIGOS ---
-        if game.enemy_manager:
-            game.enemy_manager.update(dt_seconds)
-            game.enemies = game.enemy_manager.get_enemies()
-            # projécteis de inimigos: a gestão passa a ser feita directamente
-            # (ex: dentro de Enemy usando o ProjectileManager)
-
-        # --- UPDATE BOSS ---
-        game.update_boss(dt_seconds)
-
-        # --- UPDATE PICKUPS ---
-        if game.pickup_manager:
-            player_rect = game.player.rect if game.player else None
-            pickup_events = game.pickup_manager.update(
-                dt_seconds,
-                player_rect=player_rect,
-            )
-            for ev in pickup_events:
-                game.apply_pickup_effect(ev.effect)
-
-        # --- UPDATE PROJÉCTEIS ---
-        if game.projectile_manager:
-            game.projectile_manager.update(dt_seconds)
-
-        # --- UPDATE GRANADAS ---
-        game.update_granades(dt_ms_scaled)
-
-        # --- COLISÕES ---
-        game.handle_collisions()
-
-        if not isinstance(game.current_scene, LevelScene):
-            return
-        
-        # --- FIM DE NÍVEL (Lvl1 → Lvl2) ---
-        # Só fazemos auto-transição quando estamos no 1.º nível
-        # (debug_level_index == 0) e já não há inimigos vivos nem spawns.
-        if (
-            getattr(game, "debug_level_index", 0) == 0
-            and game.enemy_manager is not None
-        ):
-            em = game.enemy_manager
-            try:
-                total_max = em.max_spawns
-                total_spawned = em.total_spawned
-                active_now = em.active_enemies_count
-            except Exception:
-                total_max = 0
-                total_spawned = 0
-                active_now = 0
-
-            if total_max > 0:
-                killed = max(0, total_spawned - active_now)
-                kill_ratio = killed / float(total_max)
-
-                enough_kills = kill_ratio >= 0.60
-                no_active_enemies = active_now == 0
-
-                if enough_kills and no_active_enemies:
-                    # 1) ecrã de COMPLETE (com end.mp3)
-                    # 2) loading com barra
-                    # 3) arranca próximo nível
-                    game.show_level_complete_screen()
-                    game.go_to_next_level()
-                    return
-                
-        # --- FLOATING TEXTS ---
-        for text in game.floating_texts:
-            text.update()
-        game.floating_texts = [t for t in game.floating_texts if t.lifetime > 0]
-
-        # --- CÂMARA / POV ---
-        if game.player:
-            game.POV = game.player.rect.centerx - config.WIDTH // 2
-            game.POV = max(0, min(game.POV, game.bg_width - config.WIDTH))
-
-    def draw(self, screen: pg.Surface):
-        game = self.game
-
-        # Cena normal
-        game.draw_scene()
-        game.draw_hud()
-
-        # Overlay de flash / FX
-        if game.effects:
-            tint = game.effects.get_screen_tint()
-            if tint is not None:
-                color, intensity = tint
-                if intensity > 0.0:
-                    overlay = pg.create_surface(
-                        (config.WIDTH, config.HEIGHT),
-                        alpha=True,
-                    )
-                    alpha = int(max(0.0, min(1.0, intensity)) * 255)
-                    overlay.fill((color[0], color[1], color[2], alpha))
-                    screen.blit(overlay, (0, 0))
-
 
 if __name__ == "__main__":
     Game().run()
