@@ -496,7 +496,7 @@ class Game:
                     self.player.granades = 1
 
             # TROCA – muda o nível inicial (só no Menu)
-            elif code == "TROCA":
+            elif code == "TTT":
                 # Só funciona no menu principal
                 if not isinstance(self.current_scene, MenuScene):
                     continue

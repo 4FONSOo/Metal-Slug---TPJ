@@ -39,6 +39,8 @@ class Boss:
         # Delay antes de descer (segundos)
         self.entry_delay = 3.0
         self.entry_timer = self.entry_delay
+        self.music_started = False
+
 
         # HP
         self.max_hp = getattr(config, "BOSS_MAX_HP", 300)
@@ -79,12 +81,31 @@ class Boss:
 
         # 1) Entrada do boss: delay + shake + descida
         if self.entering:
-            # 1.a) Delay inicial: só treme o ecrã
+            # 1.a) Delay inicial: treme e arranca já a música do boss
             if self.entry_timer > 0.0:
                 self.entry_timer -= dt_seconds
 
+                # Arrancar música do boss no primeiro frame de tremor
+                if not self.music_started and game is not None:
+                    snd = getattr(game, "sound", None)
+                    if snd and hasattr(snd, "play_music"):
+                        try:
+                            snd.stop_music()
+                        except Exception:
+                            pass
+                        try:
+                            music_file = getattr(
+                                config,
+                                "BOSS_MUSIC_FILE",
+                                "bosstheme.mp3",
+                            )
+                            snd.play_music(music_file)
+                        except Exception:
+                            pass
+                    self.music_started = True
+
+                # Tremor de ecrã durante o delay
                 if hasattr(game, "trigger_camera_shake"):
-                    # shake curto renovado todos os frames
                     game.trigger_camera_shake(0.15, 6.0)
 
                 return
@@ -95,24 +116,8 @@ class Boss:
                 self.rect.y = self.target_y
                 self.entering = False
 
-                # Troca de música para tema do boss (se quiseres aqui)
-                snd = getattr(game, "sound", None)
-                if snd and hasattr(snd, "play_music"):
-                    try:
-                        snd.stop_music()
-                    except Exception:
-                        pass
-                    try:
-                        music_file = getattr(
-                            config,
-                            "BOSS_MUSIC_FILE",
-                            "boss_theme.mp3",
-                        )
-                        snd.play_music(music_file)
-                    except Exception:
-                        pass
-
-            return  # enquanto está em fase de entrada, não ataca
+            # Enquanto está na fase de entrada (delay + descida) não faz ataques
+            return
 
         # 2) Hover cima/baixo quando já está "em jogo"
         self._hover_phase += self.hover_speed * dt_seconds
