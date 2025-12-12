@@ -176,6 +176,67 @@ class PickupManager:
         return True
 
     # ------------------------------------------------------------------ #
+    # Escolha do tipo de pickup com pesos (config.PICKUP_PROB_*)
+    # ------------------------------------------------------------------ #
+    def _choose_pickup_kind_by_weights(self) -> Optional[PickupKind]:
+        """
+        Escolhe um PickupKind usando os pesos definidos em config.
+
+        - Os valores PICKUP_PROB_* são tratados como PESOS (não têm de somar 100).
+        - Respeita include_kinds / exclude_kinds, se estiverem definidos.
+        - Se todos os pesos forem 0 (ou filtrados), devolve None.
+        """
+
+        # Ler pesos do config (garantir que são >= 0)
+        w_hp_up = max(0, int(getattr(config, "PICKUP_PROB_HP_UP", 0)))
+        w_hp_down = max(0, int(getattr(config, "PICKUP_PROB_HP_DOWN", 0)))
+        w_grenades = max(0, int(getattr(config, "PICKUP_PROB_GRENADES", 0)))
+        w_weapon_up = max(0, int(getattr(config, "PICKUP_PROB_WEAPON_UP", 0)))
+        w_time = max(0, int(getattr(config, "PICKUP_PROB_TIME", 0)))
+        w_nuke = max(0, int(getattr(config, "PICKUP_PROB_NUKE", 0)))
+
+        weighted_kinds = [
+            (w_hp_up, PickupKind.HP_UP),
+            (w_hp_down, PickupKind.HP_DOWN),
+            (w_grenades, PickupKind.GRENADES),
+            (w_weapon_up, PickupKind.WEAPON_UP),
+            (w_time, PickupKind.TIME),
+            (w_nuke, PickupKind.NUKE),
+        ]
+
+        # Aplicar filtros include/exclude, se existirem
+        valid: List[tuple[int, PickupKind]] = []
+        for weight, kind in weighted_kinds:
+            if weight <= 0:
+                continue
+
+            if self._include_kinds is not None and kind not in self._include_kinds:
+                continue
+            if self._exclude_kinds is not None and kind in self._exclude_kinds:
+                continue
+
+            valid.append((weight, kind))
+
+        # Se não sobrou nada, devolve None → usamos fallback depois
+        if not valid:
+            return None
+
+        total = sum(w for (w, _) in valid)
+        if total <= 0:
+            return None
+
+        r = random.uniform(0, total)
+        acum = 0.0
+        for weight, kind in valid:
+            acum += weight
+            if r <= acum:
+                return kind
+
+        # Fallback (teoricamente não chega aqui)
+        return valid[-1][1]
+
+
+    # ------------------------------------------------------------------ #
     # API pública
     # ------------------------------------------------------------------ #
 
@@ -220,15 +281,27 @@ class PickupManager:
         if len(self._pickups) >= self.max_active:
             return None
 
+        # 1) Tentar escolher o tipo com base nos pesos do config
+        chosen_kind = self._choose_pickup_kind_by_weights()
+
+        if chosen_kind is not None:
+            # Força o spawn_random_pickup a usar APENAS este tipo
+            include_kinds = [chosen_kind]
+        else:
+            # Fallback: usa os filtros originais (inclui/exclui como antes)
+            include_kinds = self._include_kinds
+
+        # 2) Deixar o spawn_random_pickup tratar da posição, lifetime, etc.
         p = spawn_random_pickup(
             level_width=self.level_width,
             ground_y=self.ground_y,
-            include=self._include_kinds,
+            include=include_kinds,
             exclude=self._exclude_kinds,
             platforms=self._platforms,
         )
         self._pickups.append(p)
         return p
+
 
     def update(
         self,

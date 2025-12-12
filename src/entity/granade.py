@@ -2,9 +2,12 @@
 #
 # Lógica da granada (Granade):
 #  - movimento em arco (velocidade inicial + gravidade)
-#  - explode após um certo tempo (fuse_time, em segundos)
+#  - explode após um certo tempo (fuse_time, em segundos) OU por impacto
 #  - dano em área (explosion_radius)
 #  - NÃO depende de pygame nem de pg_engine.
+
+import config
+
 
 class Granade:
     STATE_FLYING = "flying"
@@ -22,7 +25,7 @@ class Granade:
         damage=3500,
         flight_radius=8,        # raio da bola em voo
         explosion_radius=80,    # raio da explosão (dano em área)
-        fuse_time=0.8,          # segundos até explodir
+        fuse_time=0.8,          # segundos até explodir (se NÃO for só impacto)
         gravity=1800.0,         # px/s^2
         explosion_duration=0.2  # segundos visíveis da explosão
     ):
@@ -36,6 +39,9 @@ class Granade:
 
         self.owner = owner
         self.damage = int(damage)
+
+        # Granadas do boss → só por impacto (sem fuse temporizado)
+        self.impact_only = (owner == "boss")
 
         # tamanhos
         self.flight_radius = int(flight_radius)
@@ -78,9 +84,24 @@ class Granade:
             self.x += self.vx * dt
             self.y += self.vy * dt
 
-            # verifica se é altura de explodir
-            if self._elapsed >= self.fuse_time:
-                self.explode()
+            # --- impacto com o "chão" (fundo do ecrã) ---
+            try:
+                ground_y = float(getattr(config, "HEIGHT", 0))
+            except Exception:
+                ground_y = 0.0
+
+            if ground_y > 0:
+                # quando o centro da granada passa do chão → explode por impacto
+                if self.y >= ground_y - self.flight_radius:
+                    self.y = ground_y - self.flight_radius
+                    self.explode()
+                    # não queremos fuse nesse frame depois de já ter explodido
+                    return
+
+            # --- fuse temporizado (apenas se NÃO for granada de boss) ---
+            if not getattr(self, "impact_only", False):
+                if self._elapsed >= self.fuse_time:
+                    self.explode()
 
         elif self.state == self.STATE_EXPLODING:
             self._explosion_elapsed += dt

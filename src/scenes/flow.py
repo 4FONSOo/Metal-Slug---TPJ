@@ -25,7 +25,7 @@ class LevelCompleteScene(Scene):
     Ecrã de 'COMPLETE' no fim de um nível.
 
     - Mostra texto "COMPLETE" + hint.
-    - Pára a música anterior e toca end.mp3.
+    - Pára a música anterior e toca o jingle de fim de nível UMA VEZ.
     - ENTER / SPACE / ESC → avança para LoadingScene.
     """
 
@@ -35,6 +35,10 @@ class LevelCompleteScene(Scene):
         self.small_font = None
         self.title_surf = None
         self.hint_surf = None
+
+        # flag para garantir que o som só toca uma vez,
+        # mesmo que on_enter seja chamado de novo por engano
+        self._sfx_played = False
 
     def on_enter(self) -> None:
         # Fonts / textos
@@ -59,19 +63,27 @@ class LevelCompleteScene(Scene):
             (220, 220, 220),
         )
 
-        # Música de fim de nível
-        try:
-            self.game.sound.stop_music()
-        except Exception:
-            pass
-
-        try:
-            self.game.sound.play_music("end.mp3")
-        except Exception:
+        # Música / som de fim de nível:
+        #  - pára a música actual
+        #  - toca UM jingle (SFX), sem loop
+        snd = getattr(self.game, "sound", None)
+        if snd and not self._sfx_played:
             try:
-                self.game.sound.play_sfx("end.mp3")
+                snd.stop_music()
             except Exception:
                 pass
+
+            try:
+                # Se o SoundManager tiver método dedicado, usa-o
+                if hasattr(snd, "play_level_end"):
+                    snd.play_level_end()
+                # caso contrário, tenta tocar end.mp3 como SFX normal
+                elif hasattr(snd, "play_sfx"):
+                    snd.play_sfx("end.mp3")
+            except Exception:
+                pass
+
+            self._sfx_played = True
 
     def handle_input(self, events: List[pg.Event]) -> None:
         for event in events:
@@ -115,7 +127,6 @@ class LevelCompleteScene(Scene):
                 config.HEIGHT // 2 + 20,
             ),
         )
-
 
 class LoadingScene(Scene):
     """

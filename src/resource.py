@@ -146,6 +146,7 @@ def load_pickup_sprites() -> dict[PickupKind, pg.Surface]:
         PickupKind.GRENADES: "Granades.png",
         PickupKind.NUKE: "Nuke.png",
         PickupKind.WEAPON_UP: "Upgrade.png",
+        PickupKind.TIME: "Time.png",
     }
 
     sprites: dict[PickupKind, pg.Surface] = {}

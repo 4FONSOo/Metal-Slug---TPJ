@@ -9,15 +9,18 @@ Cérebro principal do jogo:
 Nota: aqui não se importa pygame directamente, só pg_engine.
 """
 
-import sys
 import random  # <- para o enemy_factory
 
 import pg_engine as pg
+from pg_engine import Vector2
+
 import config
-import controls
+from config import DIFFICULTY_PRESETS, DEFAULT_DIFFICULTY, CHEAT_CODES
 
 from scene import Scene
+
 from cheats import CheatEngine
+
 from managers.input_manager import (
     is_fire_pressed,
     get_shoot_direction,
@@ -37,6 +40,7 @@ from managers.effects_manager import EffectsManager
 from managers.enemy_manager import EnemyManager, SpawnZone
 from managers.scene_manager import SceneManager
 
+from entity.boss import Boss
 from entity.player import Player
 from entity.enemy import (
     Enemy,
@@ -46,10 +50,12 @@ from entity.enemy import (
     EnemyFast,
 )
 
-from entity.boss import Boss
-
 from entity.projectile import Projectile
 from entity.granade import Granade  # lógica da granada
+
+from scenes.menu import Menu as MenuScene  # cena de menu principal
+from scenes.level import LevelScene
+from scenes.flow import NoMoreLevelsScene
 
 from scenes.Lvl1 import load_level as load_level_1
 from scenes.Lvl2 import load_level as load_level_2
@@ -59,16 +65,15 @@ LEVEL_LOADERS = [
     load_level_2,  # índice 1 → Lvl2
 ]
 
-from scenes.menu import Menu as MenuScene  # cena de menu principal
-from scenes.level import LevelScene
-from scenes.flow import NoMoreLevelsScene
+from scenes.game_over import GameOverScene
+import score
+
 
 from sound import SoundManager
-from config import DIFFICULTY_PRESETS, DEFAULT_DIFFICULTY, CHEAT_CODES
-from pg_engine import Vector2
-from score import ScoreManager, EnterNameScene, HighScoreScene
+
 from resource import load_pickup_sprites, load_enemy
 
+#from score import ScoreManager
 
 def draw_text_with_outline(surface, text, font, x, y, color, outline_color=(0, 0, 0)):
     """Texto com contorno maroto, para o HUD não desaparecer no fundo."""
@@ -156,6 +161,112 @@ class Game:
         self.font = pg.create_font(config.HUD_FONT_NAME, config.HUD_FONT_SIZE)
         self.sound = SoundManager()
 
+        try:
+            from score import ScoreManager as _ScoreManager
+            print("[SCORE] A usar ScoreManager de score.py")
+        except Exception as e:
+            print("[WARN] Falha a importar ScoreManager de score.py:", e)
+            print("[WARN] A usar ScoreManager de fallback (com ficheiro scores.json).")
+
+            import json
+            import os
+
+            SCORE_FILE = "scores.json"
+            MAX_HIGH_SCORES = 7
+
+            class _ScoreManager:
+                def __init__(
+                    self,
+                    filename: str = SCORE_FILE,
+                    max_scores: int = MAX_HIGH_SCORES,
+                ):
+                    self.filename = filename
+                    self.max_scores = max_scores
+                    self.current_score = 0
+                    self.high_scores = []
+                    self.load_scores()
+
+                # -----------------------------
+                # Score da run actual
+                # -----------------------------
+                def reset_current(self):
+                    self.current_score = 0
+
+                def add_points(self, pontos: int):
+                    if pontos <= 0:
+                        return
+                    self.current_score += pontos
+
+                # -----------------------------
+                # Highscores (ficheiro)
+                # -----------------------------
+                def load_scores(self):
+                    if not os.path.exists(self.filename):
+                        self.high_scores = []
+                        return
+
+                    try:
+                        with open(self.filename, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+
+                        if isinstance(data, list):
+                            self.high_scores = []
+                            for e in data:
+                                try:
+                                    name = str(e.get("name", "???")).strip().upper()[:12]
+                                    score = int(e.get("score", 0))
+                                    self.high_scores.append(
+                                        {"name": name, "score": score}
+                                    )
+                                except Exception:
+                                    continue
+
+                            self.high_scores.sort(
+                                key=lambda e: e["score"], reverse=True
+                            )
+                            self.high_scores = self.high_scores[: self.max_scores]
+                        else:
+                            self.high_scores = []
+                    except Exception as e2:
+                        print(
+                            f"[SCORE] Ficheiro de scores marado, vou limpar. Erro: {e2}"
+                        )
+                        self.high_scores = []
+
+                def save_scores(self):
+                    try:
+                        with open(self.filename, "w", encoding="utf-8") as f:
+                            json.dump(self.high_scores, f, ensure_ascii=False, indent=2)
+                    except Exception as e:
+                        print(f"[SCORE] Não consegui gravar scores: {e}")
+
+                # -----------------------------
+                # Lógica de highscore
+                # -----------------------------
+                def qualifies_for_highscore(self) -> bool:
+                    if self.current_score <= 0:
+                        return False
+
+                    if len(self.high_scores) < self.max_scores:
+                        return True
+
+                    return self.current_score > self.high_scores[-1]["score"]
+
+                def register_current_score(self, name: str):
+                    name = (name or "???").strip().upper()[:12]
+                    entry = {"name": name, "score": self.current_score}
+                    self.high_scores.append(entry)
+                    self.high_scores.sort(
+                        key=lambda e: e["score"], reverse=True
+                    )
+                    self.high_scores = self.high_scores[: self.max_scores]
+                    self.save_scores()
+
+                def get_high_scores(self):
+                    return list(self.high_scores)
+
+        self.score_manager = _ScoreManager()
+
         # Sprites dos pickups (health, granadas, etc.)
         try:
             self.pickup_sprites = load_pickup_sprites()
@@ -164,7 +275,8 @@ class Game:
             self.pickup_sprites = {}
 
         # Sistema de scores (pontuação actual + highscores)
-        self.score_manager = ScoreManager()
+        # 
+        self.score_manager = score.ScoreManager()
 
         # Gestor de cenas
         self.scene_manager = SceneManager(self)
@@ -303,6 +415,64 @@ class Game:
         return max_spawns, max_active, damage_multiplier
 
     # ----------------------------- #
+    # VERIFICAR SE CONDIÇÃO DE X% É CUMPRIDA
+    # ----------------------------- #
+
+    def get_enemy_kill_stats(self):
+        """
+        Devolve estatísticas dos inimigos deste nível:
+
+          killed: nº de inimigos mortos
+          total_max: nº total de spawns possíveis
+          kill_ratio: killed / total_max (0.0–1.0)
+          active_now: nº de inimigos actualmente vivos
+        """
+        em = self.enemy_manager
+        if em is None:
+            return 0, 0, 0.0, 0
+
+        try:
+            total_max = int(getattr(em, "max_spawns", 0))
+            total_spawned = int(getattr(em, "total_spawned", 0))
+            active_now = int(getattr(em, "active_enemies_count", 0))
+        except Exception:
+            return 0, 0, 0.0, 0
+
+        total_max = max(0, total_max)
+        total_spawned = max(0, total_spawned)
+        active_now = max(0, active_now)
+
+        killed = max(0, min(total_spawned, total_max) - active_now)
+        kill_ratio = (killed / float(total_max)) if total_max > 0 else 0.0
+
+        return killed, total_max, kill_ratio, active_now
+
+    def has_enough_kills_for_current_level(self) -> bool:
+        """
+        Verifica se já cumprimos o requisito mínimo de kills
+        para desbloquear o próximo nível.
+
+        Neste momento só aplicamos isto no NÍVEL 1.
+        """
+        level_id = getattr(self, "current_level_id", 1)
+
+        # Só nível 1 tem este requisito especial
+        if level_id != 1:
+            return True
+
+        killed, total_max, kill_ratio, active_now = self.get_enemy_kill_stats()
+        required_ratio = float(getattr(config, "LEVEL1_REQUIRED_KILL_RATIO", 0.60))
+
+        if total_max <= 0:
+            # Se não houver inimigos configurados, por segurança dizemos que não passou
+            return False
+
+        return kill_ratio >= required_ratio
+
+
+
+
+    # ----------------------------- #
     # FX
     # ----------------------------- #
     def flash(self, color, frames=None):
@@ -385,10 +555,15 @@ class Game:
         self.maybe_spawn_boss()
 
         boss = self.boss
-        if not boss or not getattr(boss, "alive", False):
-            # (Mais tarde podemos tratar aqui do fim de nível ao matar o boss)
+        if not boss:
             return
 
+        if not getattr(boss, "alive", False):
+
+            self.has_boss = False
+            self.boss = None
+            return
+        
         # Movimento / AI / tiros
         boss.update(dt_seconds, self)
 
@@ -560,41 +735,31 @@ class Game:
     # GAME OVER / START
     # ----------------------------- #
     def handle_game_over(self):
-        """Mostra GAME OVER, trata de highscores e volta ao menu."""
-        # Sincroniza pontuação actual com o ScoreManager (por segurança)
-        if self.game_state:
+        """
+        Transição para a cena de Game Over.
+
+        - Sincroniza a pontuação actual com o ScoreManager
+        - Delega toda a lógica de pedir nome / mostrar tabela de highscores
+          na GameOverScene.
+        """
+        # Sincronizar a pontuação actual (caso ainda não esteja)
+        if self.game_state is not None:
             self.score_manager.current_score = self.game_state.score
 
-        final_score = self.score_manager.current_score
+        # Parar a música actual
+        try:
+            self.sound.stop_music()
+        except Exception:
+            pass
 
-        # Pára a música e mostra texto de GAME OVER
-        self.sound.stop_music()
-        text = pg.render_text(self.font, "GAME OVER", (255, 50, 50))
-        self.screen.blit(
-            text,
-            (config.WIDTH // 2 - text.get_width() // 2, config.HEIGHT // 2),
-        )
-        pg.display_flip()
-        pg.time_wait(config.GAME_OVER_WAIT_MS)
+        # Tocar som de game over (se existir)
+        try:
+            self.sound.play_game_over_sfx()
+        except Exception:
+            pass
 
-        # Se o score entrar no top, pedir nome
-        if final_score > 0 and self.score_manager.qualifies_for_highscore():
-            enter_scene = EnterNameScene(self.screen, self.clock, self.score_manager)
-            name = enter_scene.run()
-            if name:
-                self.score_manager.register_current_score(name)
-
-        # Mostrar tabela de highscores
-        high_scene = HighScoreScene(self.screen, self.clock, self.score_manager)
-        high_scene.run()
-
-        # Reset do estado e voltar ao menu
-        self.reset_all_state()
-
-        #DEBUG DE NÍVEL
-
-        self.change_scene(MenuScene(self))
-
+        # Ir para a cena de Game Over (não bloqueante)
+        self.change_scene(GameOverScene(self))
         
 
     def go_to_next_level(self) -> None:
@@ -960,13 +1125,21 @@ class Game:
                 except Exception:
                     pass
 
+            boss = getattr(self, "boss", None)
+
             for enemy in self.enemies:
                 if not getattr(enemy, "alive", False):
                     continue
+
+                # Boss é imune à nuke
+                if boss is not None and enemy is boss:
+                    continue
+
                 enemy.take_damage(99999)
                 if not enemy.alive:
                     points = getattr(enemy, "points", 100)
                     self.add_score(points, enemy.rect.centerx, enemy.rect.top)
+
 
         # ---------------- Som opcional ----------------
         sfx_name = effect.get("sfx") or None
@@ -1057,10 +1230,38 @@ class Game:
 
         alvo.take_damage(config.MELEE_KILL_DAMAGE)
 
-        if not alvo.alive:
+        if not alvo:
+            return False
+
+        # Som da faca
+        try:
+            self.sound.play_melee()
+        except Exception:
+            pass
+
+        # Dano especial no boss: não queremos que a faca o one-shot.
+        boss = getattr(self, "boss", None)
+        if boss is not None and alvo is boss:
+            # Podes afinar em config.BOSS_MELEE_DAMAGE;
+            # por defeito tira 1% da vida máxima do boss, just for the lols.
+            base_hp = getattr(boss, "max_hp", 1000)
+            melee_damage = getattr(
+                config,
+                "BOSS_MELEE_DAMAGE",
+                int(base_hp * 0.01),  # 1% do HP por facada
+            )
+        else:
+            melee_damage = config.MELEE_KILL_DAMAGE
+
+        alvo.take_damage(melee_damage)
+
+        if not getattr(alvo, "alive", False):
             points = getattr(alvo, "points", 100)
             self.add_score(points, alvo.rect.centerx, alvo.rect.top)
-            self.sound.play_enemy_death()
+            try:
+                self.sound.play_enemy_death()
+            except Exception:
+                pass
 
         return True
 
@@ -1076,27 +1277,48 @@ class Game:
             self.enemy_projectiles,
         )
 
+        # ------------------------------------------
         # Projécteis do player em inimigos
+        # ------------------------------------------
+        boss = getattr(self, "boss", None)
+        processed_projectiles = set()
+
         for hit in result.enemy_hits:
             proj = hit.projectile
             enemy = hit.enemy
+
+            # Já tratámos este projéctil num hit anterior
+            if proj in processed_projectiles:
+                continue
 
             if not getattr(enemy, "alive", False):
                 continue
 
             damage = getattr(proj, "damage", 0)
+            base_damage = getattr(proj, "base_damage", None)
+
+            # No boss, ignorar o multiplicador da arma melhorada
+            if boss is not None and enemy is boss and base_damage is not None:
+                damage = base_damage
+
+            was_alive = getattr(enemy, "alive", True)
+            before_hp = getattr(enemy, "hp", None)
+
             try:
                 enemy.take_damage(damage)
             except Exception:
-                pass
+                processed_projectiles.add(proj)
+                continue
 
-            if hasattr(proj, "trigger_hit"):
-                try:
-                    proj.trigger_hit()
-                except Exception:
-                    pass
+            now_alive = getattr(enemy, "alive", True)
+            after_hp = getattr(enemy, "hp", None)
 
-            if not getattr(enemy, "alive", False):
+            just_died = (was_alive and not now_alive)
+            if not just_died and before_hp is not None and after_hp is not None:
+                if before_hp > 0 and after_hp <= 0:
+                    just_died = True
+
+            if just_died:
                 points = getattr(enemy, "points", 100)
                 self.add_score(points, enemy.rect.centerx, enemy.rect.top)
                 try:
@@ -1104,7 +1326,20 @@ class Game:
                 except Exception:
                     pass
 
+            # Projéctil morre ao primeiro impacto
+            if hasattr(proj, "alive"):
+                proj.alive = False
+            if hasattr(proj, "trigger_hit"):
+                try:
+                    proj.trigger_hit()
+                except Exception:
+                    pass
+
+            processed_projectiles.add(proj)
+
+        # ------------------------------------------
         # Projécteis de inimigos em player
+        # ------------------------------------------
         if self.player and not self.god_mode:
             for hit in result.player_hits:
                 proj = hit.projectile
@@ -1121,7 +1356,9 @@ class Game:
                     except Exception:
                         pass
 
+        # ------------------------------------------
         # Contacto físico player <-> inimigos
+
         if self.player and not self.god_mode:
             for contact in result.contact_hits:
                 enemy = contact.enemy
@@ -1129,10 +1366,23 @@ class Game:
                     continue
 
                 try:
+                    # Player leva dano de contacto
                     self.player.take_damage(enemy.contact_damage_to_player())
+
+                    # Inimigo também pode levar dano ao tocar no player
+                    was_alive = getattr(enemy, "alive", False)
                     enemy.take_damage(enemy.contact_self_damage())
                 except Exception:
-                    pass
+                    continue
+
+                # Se o contacto matou o inimigo, dar pontos + som tal como nos projécteis
+                if was_alive and not getattr(enemy, "alive", False):
+                    points = getattr(enemy, "points", 100)
+                    self.add_score(points, enemy.rect.centerx, enemy.rect.top)
+                    try:
+                        self.sound.play_enemy_death()
+                    except Exception:
+                        pass
 
         # Limpar inimigos mortos
         self.enemies = [e for e in self.enemies if getattr(e, "alive", False)]
@@ -1144,6 +1394,7 @@ class Game:
             except Exception:
                 pass
             self.handle_game_over()
+
 
     def handle_combat(self, dt_seconds: float) -> None:
         """
@@ -1252,6 +1503,11 @@ class Game:
                         color=projectile_color,
                     )
 
+                    spawn_left = self.POV
+                    spawn_right = self.POV + config.WIDTH
+                    setattr(proj, "spawn_view_left", spawn_left)
+                    setattr(proj, "spawn_view_right", spawn_right)
+
                     if upgraded_shot:
                         base_damage = getattr(proj, "damage", 1)
                         proj.damage = base_damage * self.weapon_damage_multiplier
@@ -1309,7 +1565,9 @@ class Game:
         for g in self.granades[:]:
             g.update(dt)
 
-            # 1) Enquanto está a voar, verifica se bateu em algum inimigo
+            owner = getattr(g, "owner", "player")
+
+            # 1) Enquanto está a voar
             if g.is_flying():
                 gx, gy = g.get_center()
                 gx_i, gy_i = int(gx), int(gy)
@@ -1322,12 +1580,27 @@ class Game:
                     radius * 2,
                 )
 
-                for enemy in self.enemies:
-                    if not getattr(enemy, "alive", False):
-                        continue
-                    if enemy.rect.colliderect(grenade_rect):
-                        g.explode()
-                        break
+                if owner == "player":
+                    # -----------------------------
+                    # GRANADA DO JOGADOR
+                    # -----------------------------
+                    # Comportamento antigo: explode se bater em inimigos
+                    for enemy in self.enemies:
+                        if not getattr(enemy, "alive", False):
+                            continue
+                        if enemy.rect.colliderect(grenade_rect):
+                            g.explode()
+                            break
+                else:
+                    # -----------------------------
+                    # GRANADA DO BOSS / INIMIGOS
+                    # -----------------------------
+                    # NÃO usa colisão com TMX aqui.
+                    # Só explode se acertar directamente no player;
+                    # o "bater no chão" fica a cargo da física da própria Granade.
+                    if self.player and not self.god_mode:
+                        if self.player.rect.colliderect(grenade_rect):
+                            g.explode()
 
             # 2) Explosão: aplica dano em área uma única vez
             if g.is_exploding() and not g.damage_applied:
@@ -1343,29 +1616,91 @@ class Game:
             if g.is_dead():
                 self.granades.remove(g)
 
+
     def apply_granade_aoe_damage(self, granade: Granade):
         """
         Aplica dano em área à volta da granada.
-        Só afecta inimigos (por agora).
+
+        - Se for do jogador → afecta inimigos (inclui boss).
+        - Se for do boss/inimigos → afecta o jogador.
         """
         gx, gy = granade.get_center()
         r = granade.explosion_radius
         r2 = r * r
 
-        for enemy in self.enemies:
-            if not getattr(enemy, "alive", False):
+        owner = getattr(granade, "owner", "player")
+
+        if owner == "player":
+            # -----------------------------
+            # AOE DO JOGADOR → INIMIGOS
+            # -----------------------------
+            for enemy in self.enemies:
+                if not getattr(enemy, "alive", False):
+                    continue
+
+                ex, ey = enemy.rect.center
+                dx = ex - gx
+                dy = ey - gy
+
+                if dx * dx + dy * dy <= r2:
+                    enemy.take_damage(granade.damage)
+                    if not enemy.alive:
+                        points = getattr(enemy, "points", 100)
+                        self.add_score(points, enemy.rect.centerx, enemy.rect.top)
+                        self.sound.play_enemy_death()
+        else:
+            # -----------------------------
+            # AOE DO BOSS → PLAYER
+            # -----------------------------
+            if self.player and not self.god_mode:
+                px, py = self.player.rect.center
+                dx = px - gx
+                dy = py - gy
+
+                if dx * dx + dy * dy <= r2:
+                    self.player.take_damage(granade.damage)
+
+    #
+    #   Limitar os projecteis para fora do ecrâ (é estúpido matar sem ver o que estou a fazer!!!!)
+    #
+
+    def cull_offscreen_projectiles(self) -> None:
+        """
+        Desactiva/remover projécteis do JOGADOR que já saíram da área visível.
+
+        Regra:
+          - Se o rect da bala ficar totalmente:
+              * à esquerda de POV
+              * ou à direita de POV + WIDTH
+            → marcamos como morto e removemos da lista.
+
+        Isto é independente de onde a câmara estava quando disparaste:
+        só interessa onde está AGORA.
+        """
+        if not self.projectiles:
+            return
+
+        # Janela visível em coordenadas do mundo
+        left_limit = self.POV
+        right_limit = self.POV + config.WIDTH
+
+        for proj in list(self.projectiles):
+            if proj is None:
                 continue
 
-            ex, ey = enemy.rect.center
-            dx = ex - gx
-            dy = ey - gy
+            rect = getattr(proj, "rect", None)
+            if rect is None:
+                continue
 
-            if dx * dx + dy * dy <= r2:
-                enemy.take_damage(granade.damage)
-                if not enemy.alive:
-                    points = getattr(enemy, "points", 100)
-                    self.add_score(points, enemy.rect.centerx, enemy.rect.top)
-                    self.sound.play_enemy_death()
+            # Já está totalmente fora da área visível?
+            if rect.right < left_limit or rect.left > right_limit:
+                if hasattr(proj, "alive"):
+                    proj.alive = False
+                try:
+                    self.projectiles.remove(proj)
+                except ValueError:
+                    pass
+
 
     # ----------------------------- #
     # DRAW HELPERS
@@ -1433,19 +1768,19 @@ class Game:
             if img is not None and rect is not None:
                 self.screen.blit(img, (rect.x - camera_x, rect.y))
 
-        # Boss (sprite única, se existir)
-        boss = getattr(self, "boss", None)
-        if boss:
-            img = getattr(boss, "image", None)
-            rect = getattr(boss, "rect", None)
-            if img is not None and rect is not None:
-                if hasattr(boss, "draw"):
-                    try:
-                        boss.draw(self.screen, camera_x)
-                    except Exception:
-                        self.screen.blit(img, (rect.x - camera_x, rect.y))
-                else:
-                    self.screen.blit(img, (rect.x - camera_x, rect.y))
+        # Boss (sprite única, se existir e estiver vivo)
+            boss = getattr(self, "boss", None)
+            if boss and getattr(boss, "alive", False):
+                img = getattr(boss, "image", None)
+                rect = getattr(boss, "rect", None)
+                if img is not None and rect is not None:
+                    if hasattr(boss, "draw"):
+                        try:
+                            boss.draw(self.screen, camera_x)
+                        except Exception:
+                            self.screen.blit(img, (rect.x - camera_x, rect.y))
+                        else:
+                            self.screen.blit(img, (rect.x - camera_x, rect.y))
 
         # Jogador
         if self.player:
@@ -1546,6 +1881,72 @@ class Game:
                 (x, y, bar_width * hp_ratio, bar_height),
             )
 
+        draw_text_with_outline(
+            self.screen,
+            top_text,
+            self.font,
+            20,
+            10,
+            config.HUD_TEXT_COLOR,
+        )
+
+        # --------- Contador de kills (apenas nível 1) ---------
+        level_id = getattr(self, "current_level_id", 1)
+        if level_id == 1 and self.enemy_manager is not None:
+            killed, total_max, kill_ratio, active_now = self.get_enemy_kill_stats()
+
+            if total_max > 0:
+                required_ratio = float(
+                    getattr(config, "LEVEL1_REQUIRED_KILL_RATIO", 0.60)
+                )
+
+                # nº mínimo de inimigos que tens MESMO de matar.
+                # ex.: total=50, ratio=0.6 → 30
+                # ex.: total=7,  ratio=0.6 → ceil(4.2)=5
+                required_kills = max(
+                    1,
+                        int(total_max * required_ratio + 0.9999),
+                )
+
+                # Texto no formato "Kills: 10/30"
+                kills_text = f"Kills: {killed}/{required_kills}"
+
+                # Cor baseada na progressão:
+                #   <50% do alvo  → vermelho
+                #   entre 50–99%  → amarelo
+                #   >= alvo       → verde
+                progress = killed / float(required_kills)
+
+                if killed >= required_kills:
+                    color = getattr(
+                        config,
+                        "HUD_KILL_COLOR_GREEN",
+                        (0, 255, 0),
+                    )
+                elif progress >= 0.5:
+                    color = getattr(
+                        config,
+                        "HUD_KILL_COLOR_YELLOW",
+                        (255, 255, 0),
+                    )
+                else:
+                    color = getattr(
+                        config,
+                        "HUD_KILL_COLOR_RED",
+                        (255, 80, 80),
+                    )
+
+                # Canto superior direito (ajusta X se quiseres mais à esquerda)
+                x = config.WIDTH - 200
+                y = 10
+                draw_text_with_outline(
+                    self.screen,
+                    kills_text,
+                    self.font,
+                    x,
+                    y,
+                    color,
+                )
             # Barra de vida do BOSS
         boss = getattr(self, "boss", None)
         if boss and getattr(boss, "alive", False):

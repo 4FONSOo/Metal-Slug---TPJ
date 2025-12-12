@@ -666,6 +666,26 @@ class MenuControls(Scene):
         else:
             self.game.change_scene(MenuOptions(self.game))
 
+    def _unassign_key_from_others(self, action_being_set, new_key: int) -> None:
+        """
+        Garante que 'new_key' fica apenas na action_being_set.
+        Outras actions que tinham esta tecla passam a 'não atribuída' (0).
+        """
+        for other_action, _ in self.entries:
+            if other_action is None:
+                continue
+            if other_action is action_being_set:
+                continue
+
+            try:
+                current = controls.get_key(other_action)
+            except Exception:
+                continue
+
+            if current == new_key:
+                # 0 = "não atribuído"
+                controls.set_key(other_action, 0)
+
     def handle_input(self, events: list):
         last_index = len(self.entries) - 1
         grid_count = last_index
@@ -679,11 +699,16 @@ class MenuControls(Scene):
             elif event.type == pg.KEYDOWN:
                 if self.remapping:
                     if event.key == pg.K_ESCAPE:
+                        # cancelar remapeamento
                         self.remapping = False
                     else:
                         action, _ = self.entries[self.selected]
                         if action is not None:
-                            controls.set_key(action, event.key)
+                            new_key = event.key
+                            # 1) tirar esta tecla de outras actions
+                            self._unassign_key_from_others(action, new_key)
+                            # 2) atribuir à action actual
+                            controls.set_key(action, new_key)
                         self.remapping = False
                     continue
 
@@ -743,7 +768,15 @@ class MenuControls(Scene):
             if action is None:
                 text = label
             else:
-                key_name = controls.get_key_name(action)
+                try:
+                    key_name = controls.get_key_name(action)
+                except Exception:
+                    key_name = ""
+
+                # Se estiver sem tecla (0) ou string vazia → mostra "N/A"
+                if not key_name or key_name.strip() == "":
+                    key_name = "N/A"
+
                 text = f"{label}: {key_name}"
 
             surf = pg.render_text(self.font, text, color)

@@ -90,21 +90,23 @@ class LevelScene(Scene):
         )
 
         if timeout:
-            player_alive = bool(game.player and game.player.alive)
+            # Nível terminou por tempo. No nível 1, verificar se já cumpriu
+            # a percentagem mínima de inimigos mortos.
+            level_id = getattr(game, "current_level_id", 1)
 
-            if player_alive:
+            if level_id == 1 and game.has_enough_kills_for_current_level():
+                # Sucesso → tratar como fim de nível normal
                 try:
                     game.sound.play_level_end()
                 except Exception:
                     pass
+                game.change_scene(LevelCompleteScene(game))
             else:
-                try:
-                    game.sound.play_game_over_sfx()
-                except Exception:
-                    pass
+                # Falha → Game Over normal (vai para highscores pela GameOverScene)
+                game.handle_game_over()
 
-            game.handle_game_over()
             return
+
 
         # Pausa lógica
         if game.game_state and game.game_state.paused:
@@ -142,6 +144,10 @@ class LevelScene(Scene):
         if game.projectile_manager:
             game.projectile_manager.update(dt_seconds)
 
+        # The culling of Stratholme de projécteis fora da janela
+        if hasattr(game, "cull_offscreen_projectiles"):
+            game.cull_offscreen_projectiles()            
+
         # ---------------- GRANADAS ----------------
         game.update_granades(dt_ms_scaled)
 
@@ -154,8 +160,8 @@ class LevelScene(Scene):
             return
 
         # ---------------- FIM DE NÍVEL (Lvl1 → Lvl2) ----------------
-        # Só fazemos auto-transição quando estamos no 1.º nível
-        # (debug_level_index == 0) e já não há inimigos vivos nem spawns.
+        # Só fazemos auto-transição automática quando estamos no 1.º nível
+        # (debug_level_index == 0).
         if (
             getattr(game, "debug_level_index", 0) == 0
             and game.enemy_manager is not None
@@ -165,24 +171,28 @@ class LevelScene(Scene):
                 total_max = em.max_spawns
                 total_spawned = em.total_spawned
                 active_now = em.active_enemies_count
+                spawns_remaining = em.spawns_remaining
             except Exception:
                 total_max = 0
                 total_spawned = 0
                 active_now = 0
+                spawns_remaining = 0
 
-            if total_max > 0:
-                killed = max(0, total_spawned - active_now)
-                kill_ratio = killed / float(total_max)
+            # Consideramos que "acabaram os inimigos" quando:
+            #  - não há mais inimigos vivos
+            #  - e não há mais spawns possíveis
+            enemies_finished = (active_now == 0 and spawns_remaining == 0)
 
-                enough_kills = kill_ratio >= 0.60
-                no_active_enemies = active_now == 0
+            if enemies_finished:
+                level_id = getattr(game, "current_level_id", 1)
 
-                if enough_kills and no_active_enemies:
-                    # Transição para cena de 'COMPLETE';
-                    # a própria LevelCompleteScene trata depois de LoadingScene
-                    # e esta chama game.go_to_next_level().
+                if level_id == 1 and game.has_enough_kills_for_current_level():
+                    # Sucesso → Level Complete → Level 2
                     game.change_scene(LevelCompleteScene(game))
-                    return
+                else:
+                    # Falha → Game Over normal
+                    game.handle_game_over()
+                return
 
         # ---------------- FLOATING TEXTS ----------------
         for text in game.floating_texts:

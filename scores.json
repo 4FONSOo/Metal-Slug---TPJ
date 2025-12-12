@@ -1,11 +1,27 @@
 [
   {
+    "name": "SAD",
+    "score": 22750
+  },
+  {
     "name": "DAVID",
     "score": 18190
   },
   {
     "name": "ASDASDDA",
     "score": 12120
+  },
+  {
+    "name": "ASDSAD",
+    "score": 11400
+  },
+  {
+    "name": "ASASSAAS",
+    "score": 9370
+  },
+  {
+    "name": "ASDASD",
+    "score": 7980
   },
   {
     "name": "AVS",
@@ -22,21 +38,5 @@
   {
     "name": "ABS",
     "score": 4950
-  },
-  {
-    "name": "AVSSSS",
-    "score": 4930
-  },
-  {
-    "name": "TOSTAMIS",
-    "score": 4750
-  },
-  {
-    "name": "ABS",
-    "score": 4180
-  },
-  {
-    "name": "ABS",
-    "score": 4140
   }
 ]

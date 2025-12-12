@@ -35,6 +35,7 @@ PICKUP_COLOR_HP_UP = (0, 220, 0)
 PICKUP_COLOR_HP_DOWN = (220, 0, 0)
 PICKUP_COLOR_GRENADES = (0, 180, 255)
 PICKUP_COLOR_WEAPON_UP = (255, 165, 0)
+PICKUP_COLOR_TIME = (0, 200, 255)
 PICKUP_COLOR_NUKE = (255, 255, 255)
 
 
@@ -44,6 +45,7 @@ class PickupKind(Enum):
     GRENADES = "grenades"
     WEAPON_UP = "weapon_up"
     NUKE = "nuke"
+    TIME = "time"
 
 
 def _get_color_for_kind(kind: PickupKind) -> Tuple[int, int, int]:
@@ -56,6 +58,8 @@ def _get_color_for_kind(kind: PickupKind) -> Tuple[int, int, int]:
         return PICKUP_COLOR_GRENADES
     if kind == PickupKind.WEAPON_UP:
         return PICKUP_COLOR_WEAPON_UP
+    if kind == PickupKind.TIME:
+        return PICKUP_COLOR_TIME
     if kind == PickupKind.NUKE:
         return PICKUP_COLOR_NUKE
     return PICKUP_COLOR_DEFAULT
@@ -202,6 +206,13 @@ class Pickup:
                 "nuke": True,
                 "sfx": "PickUp2.mp3",
             }
+        
+        if self.kind == PickupKind.TIME:
+            return {
+                "type": "time",
+                "time": config.TIME_PICKUP_SECONDS,
+                "sfx": "PickUp2.mp3",
+            }
 
         # fallback paranoico
         return {
@@ -281,6 +292,7 @@ def _base_random_kind() -> PickupKind:
         (config.PICKUP_PROB_GRENADES, PickupKind.GRENADES),
         (config.PICKUP_PROB_WEAPON_UP, PickupKind.WEAPON_UP),
         (config.PICKUP_PROB_NUKE, PickupKind.NUKE),
+        (config.PICKUP_PROB_TIME, PickupKind.TIME),
     ]
 
     total = sum(p for p, _ in probs)

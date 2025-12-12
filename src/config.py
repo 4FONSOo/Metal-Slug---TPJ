@@ -74,7 +74,7 @@ HUD_TEXT_COLOR = (255, 255, 255)
 
 HUD_PLAYER_HP_BAR_WIDTH = 200
 HUD_PLAYER_HP_BAR_HEIGHT = 20
-HUD_PLAYER_HP_BAR_POS = (20, 40)          # (x, y)
+HUD_PLAYER_HP_BAR_POS = (20, 40)
 HUD_PLAYER_HP_BG_COLOR = (80, 80, 80)
 
 HUD_PLAYER_HP_GREEN_THRESHOLD = 0.6
@@ -83,6 +83,10 @@ HUD_PLAYER_HP_YELLOW_THRESHOLD = 0.3
 HUD_PLAYER_HP_COLOR_GREEN = (0, 255, 0)
 HUD_PLAYER_HP_COLOR_YELLOW = (255, 255, 0)
 HUD_PLAYER_HP_COLOR_RED = (255, 0, 0)
+
+HUD_KILL_COLOR_RED = (255, 80, 80)
+HUD_KILL_COLOR_YELLOW = (255, 255, 0)
+HUD_KILL_COLOR_GREEN = (0, 255, 0)
 
 # -----------------------------
 # FLOATING TEXT (PONTUAÇÃO, ETC.)
@@ -149,6 +153,72 @@ ENEMY_MANAGER_PATROL_MAX = 350
 ENEMY_MANAGER_SPAWN_X_MARGIN = 100
 ENEMY_MANAGER_SPAWN_Y_MIN = 50
 
+LEVEL1_REQUIRED_KILL_RATIO = 0.60 #percentagem 100% -> 1
+
+# -----------------------------
+# BOSS / LUTA FINAL
+# -----------------------------
+
+# Sprite / posição base
+BOSS_WIDTH = 160              # largura do sprite do boss
+BOSS_HEIGHT = 120             # altura do sprite do boss
+BOSS_TARGET_Y_RATIO = 0.15    # % da altura do ecrã onde ele fica a pairar (0.15 = 15%)
+
+# Vida / pontuação
+BOSS_MAX_HP = 10000           # vida máxima do boss
+BOSS_POINTS = 15000           # pontos ganhos ao matar o boss
+
+# Movimento vertical (hover) e entrada
+BOSS_HOVER_AMPLITUDE = 60     # quantos pixels sobe/desce a “abanar”
+BOSS_HOVER_AMPLITUDE = 150    # distância do chão  
+BOSS_HOVER_SPEED = 1.2        # velocidade do abanão
+BOSS_ENTRY_SPEED = 180.0      # velocidade a que desce quando entra
+
+# Delay / FX da entrada
+BOSS_ENTRY_DELAY = 5.0        
+BOSS_ENTRY_SHAKE_DURATION = 0.15
+BOSS_ENTRY_SHAKE_INTENSITY = 6.0
+
+# Ataques (tiros)
+BOSS_DAMAGE_MULTIPLIER = 1.5      # multiplicador de dano dos projécteis do boss
+BOSS_SHOT_INTERVAL_MIN = 0.3      # intervalo mínimo entre ataques (segundos)
+BOSS_SHOT_INTERVAL_MAX = 0.8      # intervalo máximo entre ataques (segundos)
+BOSS_GRENADE_MIN_COUNT = 5
+BOSS_GRENADE_MAX_COUNT = 14
+BOSS_GRENADE_SPACING = 60
+BOSS_GRENADE_DAMAGE_MULTIPLIER = 2.0
+
+# Música do boss
+BOSS_MUSIC_FILE = "bosstheme.mp3"
+
+# Contacto físico
+ENEMY_CONTACT_DAMAGE_TO_PLAYER = 10   # dano base por contacto
+BOSS_CONTACT_SELF_DAMAGE = 0          # quanto dano o boss leva ao tocar no player
+
+# Movimento lateral (dash)
+BOSS_LATERAL_SPEED = 420.0          # quanto maior, mais violento o dash
+BOSS_LATERAL_DISTANCE = 260.0       # píxeis percorridos por dash
+BOSS_LATERAL_COOLDOWN_MIN = 1.5     # segundos
+BOSS_LATERAL_COOLDOWN_MAX = 3.0     # segundos
+BOSS_LATERAL_MARGIN = 40            # margem aos lados do nível
+
+# GRANADAS DO BOSS
+BOSS_GRENADE_COUNT = 2                # nº de granadas por lado em cada ataque
+BOSS_GRENADE_SPACING = 40             # espaçamento horizontal entre granadas
+
+# HUD da barra de vida do boss
+HUD_BOSS_HP_BAR_WIDTH = 300
+HUD_BOSS_HP_BAR_HEIGHT = 16
+HUD_BOSS_HP_BAR_Y = 40
+HUD_BOSS_HP_BG_COLOR = (40, 0, 0)
+HUD_BOSS_HP_COLOR = (220, 40, 40)
+
+# FX do NUKE
+NUKE_TOTAL_DURATION = 0.8
+NUKE_FLASH_COLOR = (255, 255, 255)
+NUKE_SLOWMO_FACTOR = 0.3
+NUKE_SLOWMO_DURATION = 0.5
+
 # -----------------------------
 # MENU / OPÇÕES
 # -----------------------------
@@ -172,22 +242,18 @@ PICKUP_AUTO_SPAWN_INTERVAL_MIN = 0.5
 PICKUP_AUTO_SPAWN_INTERVAL_MAX = 1
 
 # Número máximo de pickups activos em simultâneo
-PICKUP_MAX_ACTIVE = 5
+PICKUP_MAX_ACTIVE = 7
 
 # Tempo de vida de cada pickup (em segundos)
-PICKUP_LIFETIME_SECONDS = 10.0
+PICKUP_LIFETIME_SECONDS = 15.0
 
 # Probabilidades (%). Devem somar 100.
 
-# base 30% Vida Up
-PICKUP_PROB_HP_UP = 30
-# base 30% Vida Down
-PICKUP_PROB_HP_DOWN = 30
-# base 20% Granadas
-PICKUP_PROB_GRENADES = 20
-# base 15% Upgrade de rifle
-PICKUP_PROB_WEAPON_UP = 15
-# base 5% Nuke
+PICKUP_PROB_HP_UP = 50
+PICKUP_PROB_HP_DOWN = 40
+PICKUP_PROB_GRENADES = 30
+PICKUP_PROB_WEAPON_UP = 10
+PICKUP_PROB_TIME = 30
 PICKUP_PROB_NUKE = 5
 
 # Efeitos numéricos dos pickups
@@ -204,6 +270,8 @@ GRENADE_RELOAD_AMOUNT = 3
 # Vida
 HP_UP_AMOUNT = 500
 HP_DOWN_AMOUNT = 200
+
+TIME_PICKUP_SECONDS = 15
 
 # -----------------------------
 # CHEATS

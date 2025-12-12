@@ -40,13 +40,13 @@ def draw_text_with_outline(surface, text, font, x, y, color, outline_color=(0, 0
 # ---------------------------------------------------------
 
 SCORE_FILE = "scores.json"
-MAX_HIGH_SCORES = 10
+MAX_HIGH_SCORES = 7
 
 
 class ScoreManager:
     """
     Gere o score atual e a tabela de highscores.
-    Lê/escreve de um ficheeiro JSON simples.
+    Lê/escreve de um ficheiro JSON simples.
     """
 
     def __init__(self, filename: str = SCORE_FILE, max_scores: int = MAX_HIGH_SCORES):
@@ -347,7 +347,7 @@ class HighScoreScene:
         title_rect = title_surf.get_rect(center=(WIDTH // 2, HEIGHT // 6))
         self.screen.blit(title_surf, title_rect)
 
-        scores = self.score_manager.get_high_scores()
+        scores = self.score_manager.get_high_scores()[:8]
 
         if not scores:
             texto = "Ainda não há ninguém no topo... vai lá morrer com estilo!"
