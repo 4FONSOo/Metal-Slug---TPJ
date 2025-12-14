@@ -14,6 +14,7 @@ import sys
 import pg_engine as pg
 import config
 from config import WIDTH, HEIGHT
+from patterns.singleton import SingletonMeta
 
 
 # ---------------------------------------------------------
@@ -43,7 +44,7 @@ SCORE_FILE = "scores.json"
 MAX_HIGH_SCORES = 7
 
 
-class ScoreManager:
+class ScoreManager(metaclass=SingletonMeta):
     """
     Gere o score atual e a tabela de highscores.
     Lê/escreve de um ficheiro JSON simples.

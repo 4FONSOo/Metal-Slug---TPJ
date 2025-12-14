@@ -10,19 +10,43 @@ import config
 class Projectile:
     def __init__(
         self,
-        x,
-        y,
-        dir_x,
-        dir_y,
+        x=0,
+        y=0,
+        dir_x=1,
+        dir_y=0,
         speed=None,
         max_range=None,
         color=None,
         damage: int = 10,
     ):
+        # Permite pooling: cria uma instância e reusa via reset().
+        self.rect = pg.Rect(0, 0, 10, 10)
+        self.flash_color = (255, 255, 200)
+        self.reset(
+            x=x,
+            y=y,
+            dir_x=dir_x,
+            dir_y=dir_y,
+            speed=speed,
+            max_range=max_range,
+            color=color,
+            damage=damage,
+        )
+
+    def reset(
+        self,
+        *,
+        x=0,
+        y=0,
+        dir_x=1,
+        dir_y=0,
+        speed=None,
+        max_range=None,
+        color=None,
+        damage: int = 10,
+    ) -> None:
         self.x = float(x)
         self.y = float(y)
-
-        self.rect = pg.Rect(int(self.x), int(self.y), 10, 10)
 
         self.start_x = self.x
         self.start_y = self.y
@@ -40,12 +64,12 @@ class Projectile:
         self.max_range = max_range if max_range is not None else config.PLAYER_PROJECTILE_MAX_RANGE
 
         self.alive = True
-        self.damage = damage
-
+        self.damage = int(damage)
         self.color = color or config.PLAYER_PROJECTILE_COLOR
-
         self.hit_flash = 0
-        self.flash_color = (255, 255, 200)
+
+        self.rect.centerx = int(self.x)
+        self.rect.centery = int(self.y)
 
     def update(self):
         if self.alive:

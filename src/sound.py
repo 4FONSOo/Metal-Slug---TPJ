@@ -22,9 +22,10 @@ import random
 import pg_engine as pg
 import pygame as _pygame
 from resource import load_sound_path
+from patterns.singleton import SingletonMeta
 
 
-class SoundManager:
+class SoundManager(metaclass=SingletonMeta):
     def __init__(self):
         self.enabled = False
         self._sfx_cache: dict[str, _pygame.mixer.Sound] = {}

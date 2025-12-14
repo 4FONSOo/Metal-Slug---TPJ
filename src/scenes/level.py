@@ -115,10 +115,14 @@ class LevelScene(Scene):
         # ---------------- JOGADOR ----------------
         keys = pg.get_keys()
         if game.player:
-            game.player.handle_input(keys)
+            if getattr(game, "command_input", None) and getattr(game, "command_invoker", None):
+                for cmd in game.command_input.build_commands(keys, game):
+                    game.command_invoker.execute(cmd)
+            else:
+                game.player.handle_input(keys)
             game.player.update_animation(dt_ms_scaled)
             game.player.apply_gravity()
-            game.handle_combat(dt_seconds)
+            game.handle_combat(dt_seconds, keys=keys)
 
         # ---------------- INIMIGOS ----------------
         if game.enemy_manager:
@@ -146,7 +150,7 @@ class LevelScene(Scene):
 
         # The culling of Stratholme de projécteis fora da janela
         if hasattr(game, "cull_offscreen_projectiles"):
-            game.cull_offscreen_projectiles()            
+            game.cull_offscreen_projectiles()
 
         # ---------------- GRANADAS ----------------
         game.update_granades(dt_ms_scaled)

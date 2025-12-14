@@ -11,6 +11,7 @@ import os
 import pg_engine as pg
 from config import ASSETS_DIR
 from entity.pickups import PickupKind, PICKUP_WIDTH, PICKUP_HEIGHT
+from patterns.flyweight import get_global_flyweight_factory
 
 
 def find_asset(filename: str) -> str:
@@ -44,13 +45,14 @@ def load_player_sprites(width: int, height: int, character: str = "player1") -> 
     torso = None
     used_stem = None
 
+    fw = get_global_flyweight_factory()
+
     for stem in stems_to_try:
         torso_name = f"tronco_{stem}.png"
         torso_path = os.path.join(base_path, torso_name)
         if os.path.isfile(torso_path):
             used_stem = stem
-            torso = pg.load_image(torso_path)
-            torso = pg.scale_image(torso, (width, height // 2))
+            torso = fw.get_scaled_sprite(torso_path, (width, height // 2))
             break
 
     if torso is None or used_stem is None:
@@ -66,12 +68,10 @@ def load_player_sprites(width: int, height: int, character: str = "player1") -> 
         full_path = os.path.join(base_path, fname)
 
         if lower.startswith(f"idlelegs_{used_stem}"):
-            img = pg.load_image(full_path)
-            img = pg.scale_image(img, (width, height // 2))
+            img = fw.get_scaled_sprite(full_path, (width, height // 2))
             idle_legs.append(img)
         elif lower.startswith(f"runlegs_{used_stem}"):
-            img = pg.load_image(full_path)
-            img = pg.scale_image(img, (width, height // 2))
+            img = fw.get_scaled_sprite(full_path, (width, height // 2))
             run_legs.append(img)
 
     if not idle_legs:
@@ -103,8 +103,8 @@ def load_enemy(width: int = 80, height: int = 80, filename: str = "Rebel1.png"):
     if not os.path.isfile(path):
         raise FileNotFoundError(f"[resource] Inimigo onde está: {path}")
 
-    img = pg.load_image(path)
-    return pg.scale_image(img, (width, height))
+    fw = get_global_flyweight_factory()
+    return fw.get_scaled_sprite(path, (width, height))
 
 
 def load_sound_path(filename: str) -> str:
@@ -129,7 +129,8 @@ def load_pickup_sprite(filename: str):
     if not os.path.isfile(path):
         raise FileNotFoundError(f"[resource] Pickup '{filename}' não encontrado em {misc_dir}")
 
-    return pg.load_image(path)
+    fw = get_global_flyweight_factory()
+    return fw.get_sprite(path)
 
 
 def load_pickup_sprites() -> dict[PickupKind, pg.Surface]:
@@ -152,8 +153,9 @@ def load_pickup_sprites() -> dict[PickupKind, pg.Surface]:
     sprites: dict[PickupKind, pg.Surface] = {}
 
     for kind, filename in mapping.items():
-        img = load_pickup_sprite(filename)
-        img = pg.scale_image(img, (PICKUP_WIDTH, PICKUP_HEIGHT))
+        fw = get_global_flyweight_factory()
+        path = os.path.join(ASSETS_DIR, "misc", filename)
+        img = fw.get_scaled_sprite(path, (PICKUP_WIDTH, PICKUP_HEIGHT))
         sprites[kind] = img
 
     return sprites

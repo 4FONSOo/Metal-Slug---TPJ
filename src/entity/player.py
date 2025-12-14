@@ -16,6 +16,7 @@ from config import (
 from managers.input_manager import get_move_axis
 import controls
 from resource import load_player_sprites
+from patterns.state import StateManager, PlayerIdleState, PlayerRunningState, PlayerJumpingState
 
 
 class Player:
@@ -58,6 +59,11 @@ class Player:
 
         self.update_sprite()
 
+        # State Pattern: estado de movimento (idle/running/jumping)
+        self.state_manager = StateManager(self, PlayerIdleState())
+        self.state_manager.register_state(PlayerRunningState())
+        self.state_manager.register_state(PlayerJumpingState())
+
     def load_sprites(self, character: str):
         return load_player_sprites(config.PLAYER_WIDTH, config.PLAYER_HEIGHT, character)
 
@@ -83,6 +89,12 @@ class Player:
         self.image.blit(torso_sprite, (0, torso_y))
 
     def update_animation(self, dt_ms: int):
+        # Atualiza máquina de estados (não depende de teclas)
+        try:
+            self.state_manager.update((dt_ms or 0) / 1000.0)
+        except Exception:
+            pass
+
         self.animation_timer += dt_ms
         if self.animation_timer >= self.animation_speed:
             self.animation_timer = 0
@@ -94,6 +106,17 @@ class Player:
 
     def handle_input(self, keys):
         dx = get_move_axis(keys)
+        self.apply_move_axis(dx)
+
+        jump_key = controls.get_key(controls.JUMP)
+        down_key = controls.get_key(controls.DOWN)
+
+        jump_pressed = keys[jump_key]
+        down_pressed = keys[down_key]
+        self.apply_jump_input(jump_pressed=jump_pressed, down_pressed=down_pressed)
+
+    def apply_move_axis(self, dx: int) -> None:
+        """Aplica movimento horizontal a partir de um eixo discreto (-1,0,1)."""
         self.moving = dx != 0
 
         if dx < 0:
@@ -101,14 +124,12 @@ class Player:
         elif dx > 0:
             self.facing = 1
 
-        self.leg_state = "run" if self.moving else "idle"
+        self.rect.x += int(dx) * PLAYER_SPEED
+        if self.bg_width:
+            self.rect.x = max(0, min(self.rect.x, self.bg_width - self.rect.width))
 
-        jump_key = controls.get_key(controls.JUMP)
-        down_key = controls.get_key(controls.DOWN)
-
-        jump_pressed = keys[jump_key]
-        down_pressed = keys[down_key]
-
+    def apply_jump_input(self, *, jump_pressed: bool, down_pressed: bool) -> None:
+        """Aplica input de salto/queda (edge-triggered via `jump_held`)."""
         if jump_pressed and not self.jump_held and not self.is_jumping:
             if down_pressed:
                 self.drop_timer = 10
@@ -120,10 +141,6 @@ class Player:
 
         if not jump_pressed:
             self.jump_held = False
-
-        self.rect.x += dx * PLAYER_SPEED
-        if self.bg_width:
-            self.rect.x = max(0, min(self.rect.x, self.bg_width - self.rect.width))
 
     def apply_gravity(self):
         self.vel_y += PLAYER_GRAVITY
