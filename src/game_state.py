@@ -1509,7 +1509,7 @@ class Game:
 
         self.sound.play_melee()
 
-        alvo.take_damage(config.MELEE_KILL_DAMAGE)
+        #alvo.take_damage(config.MELEE_KILL_DAMAGE)
 
         if not alvo:
             return False
@@ -1520,21 +1520,19 @@ class Game:
         except Exception:
             pass
 
-        # Dano especial no boss: não queremos que a faca o one-shot.
+
+
+        # Dano especial no boss: não queremos que a faça o one-shot. Mas esta merda ainda é insta-kill.... why????
+        
         boss = getattr(self, "boss", None)
+
         if boss is not None and alvo is boss:
-            # Podes afinar em config.BOSS_MELEE_DAMAGE;
-            # por defeito tira 1% da vida máxima do boss, just for the lols.
-            base_hp = getattr(boss, "max_hp", 1000)
-            melee_damage = getattr(
-                config,
-                "BOSS_MELEE_DAMAGE",
-                int(base_hp * 0.01),  # 1% do HP por facada
-            )
+                base_hp = getattr(boss, "max_hp", None) or getattr(boss, "hp", 1000) or 1000
+                melee_damage = getattr(config, "BOSS_MELEE_DAMAGE", max(1, int(base_hp * 0.01)))  # 1% por facada
         else:
             melee_damage = config.MELEE_KILL_DAMAGE
 
-        alvo.take_damage(melee_damage)
+            alvo.take_damage(melee_damage)
 
         if not getattr(alvo, "alive", False):
             self.register_enemy_kill(alvo)

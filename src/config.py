@@ -203,8 +203,10 @@ BOSS_LATERAL_COOLDOWN_MAX = 3.0     # segundos
 BOSS_LATERAL_MARGIN = 40            # margem aos lados do nível
 
 # GRANADAS DO BOSS
-BOSS_GRENADE_COUNT = 2                # nº de granadas por lado em cada ataque
-BOSS_GRENADE_SPACING = 40             # espaçamento horizontal entre granadas
+BOSS_GRENADE_COUNT = 2              # nº de granadas por lado em cada ataque
+BOSS_GRENADE_SPACING = 40           # espaçamento horizontal entre granadas
+
+BOSS_MELEE_DAMAGE = 1               # evitar one-shot kill no boss
 
 # HUD da barra de vida do boss
 HUD_BOSS_HP_BAR_WIDTH = 300
