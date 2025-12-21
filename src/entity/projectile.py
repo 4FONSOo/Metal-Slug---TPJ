@@ -1,7 +1,4 @@
 # entity/projectile.py
-"""
-Projéctil genérico.
-"""
 
 import pg_engine as pg
 import config
@@ -19,7 +16,7 @@ class Projectile:
         color=None,
         damage: int = 10,
     ):
-        # Permite pooling: cria uma instância e reusa via reset().
+        
         self.rect = pg.Rect(0, 0, 10, 10)
         self.flash_color = (255, 255, 200)
         self.reset(

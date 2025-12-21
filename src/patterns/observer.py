@@ -58,14 +58,21 @@ class EventManager:
         """Emite um evento para todos os listeners subscritos."""
         if data is None:
             data = {}
-        
-        if event_type in self._listeners:
-            for listener in self._listeners[event_type]:
+
+        listeners = self._listeners.get(event_type, [])
+        for listener in list(listeners):
+            try:
+                # Preferível: (event_type, data)
+                listener(event_type, data)
+            except TypeError:
+                # Compatibilidade: listeners antigos que só aceitam (data)
                 try:
                     listener(data)
                 except Exception as e:
                     print(f"[EventManager] Erro ao processar {event_type}: {e}")
-    
+            except Exception as e:
+                print(f"[EventManager] Erro ao processar {event_type}: {e}")
+
     def clear(self, event_type: str | None = None) -> None:
         """Limpa listeners de um tipo ou de todos."""
         if event_type is None:

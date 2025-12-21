@@ -1,7 +1,4 @@
 # entity/player.py
-"""
-Classe do jogador.
-"""
 
 import pg_engine as pg
 import config
@@ -89,7 +86,7 @@ class Player:
         self.image.blit(torso_sprite, (0, torso_y))
 
     def update_animation(self, dt_ms: int):
-        # Atualiza máquina de estados (não depende de teclas)
+
         try:
             self.state_manager.update((dt_ms or 0) / 1000.0)
         except Exception:
@@ -116,7 +113,7 @@ class Player:
         self.apply_jump_input(jump_pressed=jump_pressed, down_pressed=down_pressed)
 
     def apply_move_axis(self, dx: int) -> None:
-        """Aplica movimento horizontal a partir de um eixo discreto (-1,0,1)."""
+        
         self.moving = dx != 0
 
         if dx < 0:
@@ -129,7 +126,7 @@ class Player:
             self.rect.x = max(0, min(self.rect.x, self.bg_width - self.rect.width))
 
     def apply_jump_input(self, *, jump_pressed: bool, down_pressed: bool) -> None:
-        """Aplica input de salto/queda (edge-triggered via `jump_held`)."""
+        
         if jump_pressed and not self.jump_held and not self.is_jumping:
             if down_pressed:
                 self.drop_timer = 10

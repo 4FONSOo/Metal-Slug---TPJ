@@ -1,16 +1,4 @@
 # entity/boss.py
-"""
-Boss helicóptero do nível.
-
-- Ignora gravidade (movimento manual).
-- Entra de cima quando o player já está quase no fim.
-- Paira e mexe-se cima/baixo.
-- Faz dashes laterais ocasionais.
-- Dispara projécteis com dano multiplicado.
-- Lança rajadas de granadas (3) que ignoram o TMX (via owner="boss").
-"""
-
-from __future__ import annotations
 
 import random
 import math
@@ -31,6 +19,7 @@ class Boss:
         # -----------------------------
         # Entrada / movimento vertical
         # -----------------------------
+        
         self.entering = True
         self.target_y = int(target_y)
         self.hover_center_y = int(target_y)
@@ -39,9 +28,11 @@ class Boss:
         self._hover_phase = 0.0
 
         # Velocidade de descida quando começa a entrar
+        
         self.entry_speed = float(getattr(config, "BOSS_ENTRY_SPEED", 180.0))
 
         # Delay antes de descer (segundos)
+        
         self.entry_delay = float(getattr(config, "BOSS_ENTRY_DELAY", 3.0))
         self.entry_timer = self.entry_delay
         self.music_started = False
@@ -49,6 +40,7 @@ class Boss:
         # -----------------------------
         # Movimento lateral (dashes)
         # -----------------------------
+        
         self.lateral_speed = float(getattr(config, "BOSS_LATERAL_SPEED", 420.0))
         self.lateral_distance = float(getattr(config, "BOSS_LATERAL_DISTANCE", 260.0))
         self.lateral_cooldown_min = float(
@@ -61,13 +53,14 @@ class Boss:
             self.lateral_cooldown_min,
             self.lateral_cooldown_max,
         )
-        self._lateral_active = False        # se está num dash neste momento
+        self._lateral_active = False        # se está em dash
         self._lateral_direction = 0         # -1 esquerda, +1 direita
         self._lateral_travelled = 0.0       # distância percorrida no dash actual
 
         # -----------------------------
         # HP / pontuação
         # -----------------------------
+        
         self.max_hp = getattr(config, "BOSS_MAX_HP", 5000)
         self.hp = self.max_hp
         self.alive = True
@@ -76,6 +69,7 @@ class Boss:
         # -----------------------------
         # Ataques (tiros)
         # -----------------------------
+        
         self.damage_multiplier = getattr(config, "BOSS_DAMAGE_MULTIPLIER", 1.5)
         self._time_since_last_shot = 0.0
         self._shot_interval_min = getattr(config, "BOSS_SHOT_INTERVAL_MIN", 0.8)
@@ -83,7 +77,7 @@ class Boss:
         self._next_shot_interval = self._random_shot_interval()
 
     # --------------------------- #
-    # Helpers internos
+    # Helpers
     # --------------------------- #
 
     def _random_shot_interval(self) -> float:
@@ -99,13 +93,14 @@ class Boss:
         level_width = getattr(game, "bg_width", config.WIDTH)
         margin = getattr(config, "BOSS_LATERAL_MARGIN", 40)
 
-        # 1) Se já estamos em dash, continuar esse movimento
+        # 1) Se está em dah, continuar
+        
         if self._lateral_active:
             step = self.lateral_speed * dt_seconds * self._lateral_direction
             self.rect.x += int(step)
             self._lateral_travelled += abs(step)
 
-            # Limites do nível
+            # Limites do mapa            
             if self.rect.left < margin:
                 self.rect.left = margin
                 self._lateral_active = False
@@ -117,7 +112,7 @@ class Boss:
             if self._lateral_travelled >= self.lateral_distance:
                 self._lateral_active = False
 
-            # Se o dash terminou, preparar próximo cooldown
+            # Se dash termina, faz cooldown
             if not self._lateral_active:
                 self._lateral_travelled = 0.0
                 self._lateral_cooldown_timer = random.uniform(
@@ -126,12 +121,12 @@ class Boss:
                 )
             return
 
-        # 2) Não estamos em dash → contar cooldown até ao próximo
+        # 2) Não está dash → contar cooldown        
         self._lateral_cooldown_timer -= dt_seconds
         if self._lateral_cooldown_timer > 0.0:
             return
 
-        # 3) Arrancar um novo dash
+        # 3) Novo dash
         player = getattr(game, "player", None)
         direction = 0
         if player:
@@ -140,7 +135,7 @@ class Boss:
             elif player.rect.centerx > self.rect.centerx:
                 direction = 1
 
-        # Se por alguma razão estiver alinhado, escolhe aleatório
+        # Direção Aleatória
         if direction == 0:
             direction = random.choice([-1, 1])
 
@@ -149,17 +144,11 @@ class Boss:
         self._lateral_travelled = 0.0
 
     # --------------------------- #
-    # API usada pelo Game
+    # Main Logic
     # --------------------------- #
 
     def update(self, dt_seconds: float = 0.0, game=None) -> None:
-        """
-        Movimento + AI básica.
 
-        Nota:
-          - EnemyManager chama enemy.update() sem argumentos → aqui game será None.
-            Nesse caso NÃO fazemos nada (o update “real” é chamado via Game.update_boss).
-        """
         if not self.alive:
             return
 
@@ -168,14 +157,16 @@ class Boss:
             return
 
         # -----------------------------
-        # 1) Entrada do boss (delay + descida)
+        # 1) Entrada boss
         # -----------------------------
+        
         if self.entering:
-            # 1.a) Delay inicial: treme e arranca já a música do boss
+            
+            # Delay inicial
             if self.entry_timer > 0.0:
                 self.entry_timer -= dt_seconds
 
-                # Arrancar música do boss no primeiro frame de tremor
+                # Música Boss
                 if not self.music_started:
                     snd = getattr(game, "sound", None)
                     if snd and hasattr(snd, "play_music"):
@@ -194,34 +185,30 @@ class Boss:
                             pass
                     self.music_started = True
 
-                # Tremor de ecrã durante o delay
+                # Tremors
                 duration = getattr(config, "BOSS_ENTRY_SHAKE_DURATION", 0.15)
                 intensity = getattr(config, "BOSS_ENTRY_SHAKE_INTENSITY", 6.0)
                 game.trigger_camera_shake(duration, intensity)
 
                 return
 
-            # 1.b) Depois do delay → descer até ao target_y
             self.rect.y += int(self.entry_speed * dt_seconds)
             if self.rect.y >= self.target_y:
                 self.rect.y = self.target_y
                 self.entering = False
 
-            # Enquanto está na fase de entrada (delay + descida) não faz ataques
             return
 
         # -----------------------------
-        # 2) Hover cima/baixo + dashes laterais
+        # 2) Posicionamento
         # -----------------------------
         self._hover_phase += self.hover_speed * dt_seconds
         offset = math.sin(self._hover_phase) * self.hover_amplitude
         self.rect.y = int(self.hover_center_y + offset)
-
-        # Movimento lateral ocasional
         self._update_lateral_movement(dt_seconds, game)
 
         # -----------------------------
-        # 3) Ataques (tiros / granadas)
+        # 3) Ataques
         # -----------------------------
         self._time_since_last_shot += dt_seconds
         if self._time_since_last_shot >= self._next_shot_interval:
@@ -230,9 +217,6 @@ class Boss:
             self._do_random_attack(game)
 
     def _do_random_attack(self, game) -> None:
-        """
-        Escolhe um dos “ataques” disponíveis.
-        """
         if not game or not game.player:
             return
 
@@ -240,13 +224,13 @@ class Boss:
             self._shoot_straight,
             self._shoot_spread,
             self._shoot_down,
-            self._throw_grenades,   # padrão: 3 granadas
+            self._throw_grenades,
         ]
         attack = random.choice(patterns)
         attack(game)
 
     # --------------------------- #
-    # Padrões de disparo (balas)
+    # Tiros
     # --------------------------- #
 
     def _base_shot(self, game, direction: Vector2):
@@ -269,7 +253,7 @@ class Boss:
         )
 
         base_damage = getattr(proj, "damage", 1)
-        proj.damage = base_damage * self.damage_multiplier  # dano x1.5
+        proj.damage = base_damage * self.damage_multiplier
 
         if game.projectile_manager:
             game.projectile_manager.add_enemy_projectile(proj)
@@ -286,11 +270,9 @@ class Boss:
         self._base_shot(game, Vector2(dx, dy))
 
     def _shoot_straight(self, game):
-        # tiro directo em direcção ao player
         self._shoot_towards_player(game)
 
     def _shoot_spread(self, game):
-        # 3 tiros em “cone”
         player = game.player
         if not player:
             return
@@ -310,28 +292,16 @@ class Boss:
         self._base_shot(game, right)
 
     def _shoot_down(self, game):
-        # “spray” para baixo (zona do chão)
         self._base_shot(game, Vector2(0, 1))
 
     # --------------------------- #
-    # Padrão de granadas
+    # Granadas
     # --------------------------- #
 
     def _throw_grenades(self, game):
-        """
-        Lança várias granadas para baixo, com offsets na horizontal.
-
-        - Número de granadas: aleatório entre 2 e 7 (por omissão).
-        - Direcção: mistura de esquerda/direita, garantindo pelo menos 1
-          para cada lado se houver 2 ou mais.
-        - As granadas têm owner="boss", logo:
-            * ignoram TMX (pela tua lógica em Game.update_granades)
-            * explodem por impacto (chão / player), não por temporizador.
-        """
         if not game or not hasattr(game, "granades"):
             return
 
-        # Número ALEATÓRIO de granadas por ataque (configurável se quiseres depois)
         min_count = getattr(config, "BOSS_GRENADE_MIN_COUNT", 2)
         max_count = getattr(config, "BOSS_GRENADE_MAX_COUNT", 7)
 
@@ -360,7 +330,7 @@ class Boss:
             directions = [random.choice([-1, 1])]
 
         for i in range(count):
-            # Espalha as granadas em leque à volta do centro do boss
+            # Espalha granadas
             offset = (i - (count - 1) / 2) * spacing
             direction = directions[i]
 
@@ -371,10 +341,9 @@ class Boss:
                 owner="boss",
             )
 
-            # Opcional: dano das granadas do boss pode ser aumentado
             try:
                 dmg_mult = float(
-                    getattr(config, "BOSS_GRENADE_DAMAGE_MULTIPLIER", 1.0)
+                    getattr(config, "BOSS_GRENADE_DAMAGE_MULTIPLIER", 1.5)
                 )
                 g.damage = int(g.damage * dmg_mult)
             except Exception:
@@ -383,7 +352,7 @@ class Boss:
             game.granades.append(g)
 
     # --------------------------- #
-    # Interface para colisões
+    # Colisões
     # --------------------------- #
 
     def take_damage(self, amount: float) -> None:

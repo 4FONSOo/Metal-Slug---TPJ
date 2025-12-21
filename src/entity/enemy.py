@@ -1,7 +1,4 @@
 # entity/enemy.py
-"""
-Inimigos e EnemyManager.
-"""
 
 import random
 import pg_engine as pg

@@ -1,3 +1,4 @@
+
 """command_input_manager.py
 
 Adapta input bruto (teclas) para Commands (Command Pattern).

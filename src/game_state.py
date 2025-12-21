@@ -9,16 +9,18 @@ Cérebro principal do jogo:
 Nota: aqui não se importa pygame directamente, só pg_engine.
 """
 
-import sys
 import random  # <- para o enemy_factory
 
 import pg_engine as pg
+from pg_engine import Vector2
+
 import config
-import controls
+from config import DIFFICULTY_PRESETS, DEFAULT_DIFFICULTY, CHEAT_CODES
 
 from scene import Scene
-from scenes.menu import Menu as MenuSecene, PauseMenu
+
 from cheats import CheatEngine
+
 from managers.input_manager import (
     is_fire_pressed,
     get_shoot_direction,
@@ -36,7 +38,9 @@ from managers.combat_manager import (
 )
 from managers.effects_manager import EffectsManager
 from managers.enemy_manager import EnemyManager, SpawnZone
+from managers.scene_manager import SceneManager
 
+from entity.boss import Boss
 from entity.player import Player
 from entity.enemy import (
     Enemy,
@@ -45,23 +49,107 @@ from entity.enemy import (
     EnemyHeavy,
     EnemyFast,
 )
+
 from entity.projectile import Projectile
 from entity.granade import Granade  # lógica da granada
 
-from scenes.Lvl1 import load_level
+# ----------------------------- #
+# OPTIONAL SYSTEMS (merged from the "new" version)
+#   - ObjectPool para reutilizar projécteis (performance)
+#   - PrototypeFactory para dados de tipos de inimigo (sprite/HP/dano/pontos)
+# Tudo é opcional: se estes módulos não existirem, há fallback seguro.
+# ----------------------------- #
+
+try:
+    # Se existir no teu projecto, usa a implementação oficial
+    from managers.object_pool import ObjectPool  # type: ignore
+except Exception:
+    class ObjectPool:
+        """Pool simples (LIFO) para reutilizar objectos."""
+
+        def __init__(self, cls, size: int = 100, factory=None, max_size: int | None = None):
+            self._cls = cls
+            self._factory = factory or cls
+            self._pool = []
+            self._max_size = int(max_size) if isinstance(max_size, int) else None
+            try:
+                for _ in range(max(0, int(size))):
+                    self._pool.append(self._factory())
+            except Exception:
+                self._pool = []
+
+        def acquire(self):
+            try:
+                return self._pool.pop()
+            except Exception:
+                return self._factory()
+
+        def release(self, obj) -> None:
+            if obj is None:
+                return
+            if self._max_size is not None and len(self._pool) >= self._max_size:
+                return
+            self._pool.append(obj)
+
+try:
+    from patterns.prototype import EnemyPrototype, get_global_prototype_factory  # type: ignore
+except Exception:
+    class EnemyPrototype:
+        def __init__(self, key: str, sprite_path: str, hp: int = 0, damage: int = 0, points: int = 0):
+            self.key = str(key)
+            self.sprite_path = str(sprite_path)
+            self.hp = int(hp)
+            self.damage = int(damage)
+            self.points = int(points)
+
+        def create(self, x: int, y: int) -> dict:
+            return {
+                "key": self.key,
+                "sprite_path": self.sprite_path,
+                "hp": self.hp,
+                "damage": self.damage,
+                "points": self.points,
+                "x": int(x),
+                "y": int(y),
+            }
+
+    class _EnemyPrototypeFactory:
+        def __init__(self):
+            self._enemies: dict[str, EnemyPrototype] = {}
+
+        def register_enemy(self, key: str, proto: EnemyPrototype) -> None:
+            self._enemies[str(key)] = proto
+
+        def create_enemy(self, key: str, x: int, y: int) -> dict | None:
+            proto = self._enemies.get(str(key))
+            return proto.create(x, y) if proto else None
+
+    _GLOBAL_PROTO_FACTORY = _EnemyPrototypeFactory()
+
+    def get_global_prototype_factory():
+        return _GLOBAL_PROTO_FACTORY
+
 from scenes.menu import Menu as MenuScene  # cena de menu principal
+from scenes.level import LevelScene
+from scenes.flow import NoMoreLevelsScene
+
+from scenes.Lvl1 import load_level as load_level_1
+from scenes.Lvl2 import load_level as load_level_2
+
+LEVEL_LOADERS = [
+    load_level_1,  # índice 0 → Lvl1
+    load_level_2,  # índice 1 → Lvl2
+]
+
+from scenes.game_over import GameOverScene
+import score
+
 
 from sound import SoundManager
-from config import DIFFICULTY_PRESETS, DEFAULT_DIFFICULTY, CHEAT_CODES
-from pg_engine import Vector2
-from score import ScoreManager, EnterNameScene, HighScoreScene
-from resource import load_pickup_sprites, load_enemy
-from patterns.observer import EventManager, ScoreObserver, SoundObserver
-from patterns.command import CommandInvoker
-from managers.command_input_manager import CommandInputManager
-from patterns.prototype import get_global_prototype_factory, EnemyPrototype
-from patterns.object_pool import ObjectPool
 
+from resource import load_pickup_sprites, load_enemy
+
+#from score import ScoreManager
 
 def draw_text_with_outline(surface, text, font, x, y, color, outline_color=(0, 0, 0)):
     """Texto com contorno maroto, para o HUD não desaparecer no fundo."""
@@ -148,16 +236,112 @@ class Game:
         self.clock = pg.create_clock()
         self.font = pg.create_font(config.HUD_FONT_NAME, config.HUD_FONT_SIZE)
         self.sound = SoundManager()
-        
-        # Sistema de eventos (Observer pattern)
-        self.event_manager = EventManager()
-        score_obs = ScoreObserver(self)
-        sound_obs = SoundObserver(self.sound)
-        self.event_manager.subscribe("enemy_dead", score_obs.on_event)
-        self.event_manager.subscribe("shoot", sound_obs.on_event)
-        self.event_manager.subscribe("melee_hit", sound_obs.on_event)
-        self.event_manager.subscribe("grenade_throw", sound_obs.on_event)
-        self.event_manager.subscribe("grenade_explode", sound_obs.on_event)
+
+        try:
+            from score import ScoreManager as _ScoreManager
+            print("[SCORE] A usar ScoreManager de score.py")
+        except Exception as e:
+            print("[WARN] Falha a importar ScoreManager de score.py:", e)
+            print("[WARN] A usar ScoreManager de fallback (com ficheiro scores.json).")
+
+            import json
+            import os
+
+            SCORE_FILE = "scores.json"
+            MAX_HIGH_SCORES = 7
+
+            class _ScoreManager:
+                def __init__(
+                    self,
+                    filename: str = SCORE_FILE,
+                    max_scores: int = MAX_HIGH_SCORES,
+                ):
+                    self.filename = filename
+                    self.max_scores = max_scores
+                    self.current_score = 0
+                    self.high_scores = []
+                    self.load_scores()
+
+                # -----------------------------
+                # Score da run actual
+                # -----------------------------
+                def reset_current(self):
+                    self.current_score = 0
+
+                def add_points(self, pontos: int):
+                    if pontos <= 0:
+                        return
+                    self.current_score += pontos
+
+                # -----------------------------
+                # Highscores (ficheiro)
+                # -----------------------------
+                def load_scores(self):
+                    if not os.path.exists(self.filename):
+                        self.high_scores = []
+                        return
+
+                    try:
+                        with open(self.filename, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+
+                        if isinstance(data, list):
+                            self.high_scores = []
+                            for e in data:
+                                try:
+                                    name = str(e.get("name", "???")).strip().upper()[:12]
+                                    score = int(e.get("score", 0))
+                                    self.high_scores.append(
+                                        {"name": name, "score": score}
+                                    )
+                                except Exception:
+                                    continue
+
+                            self.high_scores.sort(
+                                key=lambda e: e["score"], reverse=True
+                            )
+                            self.high_scores = self.high_scores[: self.max_scores]
+                        else:
+                            self.high_scores = []
+                    except Exception as e2:
+                        print(
+                            f"[SCORE] Ficheiro de scores marado, vou limpar. Erro: {e2}"
+                        )
+                        self.high_scores = []
+
+                def save_scores(self):
+                    try:
+                        with open(self.filename, "w", encoding="utf-8") as f:
+                            json.dump(self.high_scores, f, ensure_ascii=False, indent=2)
+                    except Exception as e:
+                        print(f"[SCORE] Não consegui gravar scores: {e}")
+
+                # -----------------------------
+                # Lógica de highscore
+                # -----------------------------
+                def qualifies_for_highscore(self) -> bool:
+                    if self.current_score <= 0:
+                        return False
+
+                    if len(self.high_scores) < self.max_scores:
+                        return True
+
+                    return self.current_score > self.high_scores[-1]["score"]
+
+                def register_current_score(self, name: str):
+                    name = (name or "???").strip().upper()[:12]
+                    entry = {"name": name, "score": self.current_score}
+                    self.high_scores.append(entry)
+                    self.high_scores.sort(
+                        key=lambda e: e["score"], reverse=True
+                    )
+                    self.high_scores = self.high_scores[: self.max_scores]
+                    self.save_scores()
+
+                def get_high_scores(self):
+                    return list(self.high_scores)
+
+        self.score_manager = _ScoreManager()
 
         # Sprites dos pickups (health, granadas, etc.)
         try:
@@ -167,10 +351,11 @@ class Game:
             self.pickup_sprites = {}
 
         # Sistema de scores (pontuação actual + highscores)
-        self.score_manager = ScoreManager()
+        # 
+        self.score_manager = score.ScoreManager()
 
-        # Cena actual (menu, nível, etc.)
-        self.current_scene: Scene | None = None
+        # Gestor de cenas
+        self.scene_manager = SceneManager(self)
         self.running = True
 
         # Nível / cenário
@@ -178,6 +363,9 @@ class Game:
         self.background = None
         self.bg_width = config.WIDTH
         self.platforms: list[pg.Rect] = []
+        self.current_level_id: int = 1
+
+        #self.debug_level_index = 0  # cheat TTT
 
         # Jogador / inimigos / projécteis
         self.player_choice = "player1"
@@ -189,9 +377,12 @@ class Game:
         self.granades: list[Granade] = []                # granadas do jogador
         self.floating_texts: list[FloatingText] = []
 
+        # Boss de nível (ex: helicóptero)
+        self.boss: Boss | None = None
+        self.has_boss: bool = False
+
         # Gestor de projécteis
         self.projectile_manager: ProjectileManager | None = None
-        self.projectile_pool = None
 
         # Gestor de colisões (stateless, pode ser partilhado)
         self.collision_manager = CollisionManager()
@@ -210,10 +401,6 @@ class Game:
         self.granade_pressed = False      # estado da tecla de granada no frame anterior
         self.aim_dir = Vector2(1, 0)
 
-        # Command pattern (input -> ações)
-        self.command_invoker = CommandInvoker(history_limit=200)
-        self.command_input = CommandInputManager()
-
         # Upgrade de arma (stacks afectam dano / fire-rate)
         self.weapon_upgrade_stacks = 0
         self.weapon_fire_rate_multiplier = 1.0
@@ -229,6 +416,9 @@ class Game:
         # Estado lógico (score / tempo / etc.)
         self.game_state: GameState | None = None
 
+        # Debug Only: Troca entre o Lvl1 e Lvl2 (posso complicar, mas............)
+        self.debug_start_level = 1
+
         # Cheats
         self.cheat_engine = CheatEngine(CHEAT_CODES)
         self.god_mode = False
@@ -236,18 +426,30 @@ class Game:
         self.infinite_granades = False
         self.super_jump = False
 
+        self.debug_level_index = 0
+
         # Começamos no menu principal
         self.change_scene(MenuScene(self))
+
+    # ----------------------------- #
+    # SCENES / SCENE MANAGER
+    # ----------------------------- #
+    @property
+    def current_scene(self) -> Scene | None:
+        """Compat: devolve a cena actual a partir do SceneManager."""
+        return self.scene_manager.current_scene
+
+    @current_scene.setter
+    def current_scene(self, value: Scene | None) -> None:
+        """Compat: permite atribuir current_scene, delegando no SceneManager."""
+        self.scene_manager.current_scene = value    
 
     # ----------------------------- #
     # GESTÃO DE CENAS
     # ----------------------------- #
     def change_scene(self, new_scene: Scene):
-        """Troca de cena de forma civilizada."""
-        if self.current_scene is not None:
-            self.current_scene.on_exit()
-        self.current_scene = new_scene
-        self.current_scene.on_enter()
+        """Troca de cena de forma civilizada via SceneManager."""
+        self.scene_manager.change_scene(new_scene)
 
     # ----------------------------- #
     # DIFICULDADE
@@ -274,39 +476,265 @@ class Game:
         max_spawns = preset.get(
             "ENEMY_MAX_SPAWNS",
             config.ENEMY_MANAGER_MAX_SPAWNS_DEFAULT,
-        )
+        )      
         max_active = preset.get(
             "ENEMY_MAX_ACTIVE",
             config.ENEMY_MANAGER_MAX_ACTIVE_DEFAULT,
         )
         damage_multiplier = preset.get("ENEMY_DAMAGE_MULTIPLIER", 1.0)
+
+        # Se o nível for “caótico”, quadruplicar nº de inimigos
+        if getattr(self, "enemy_density", "normal") == "chaotic":
+            max_spawns *= 4
+            max_active *= 4
+
         return max_spawns, max_active, damage_multiplier
 
+    # ----------------------------- #
+    # VERIFICAR SE CONDIÇÃO DE X% É CUMPRIDA
+    # ----------------------------- #
+
+    def get_enemy_kill_stats(self):
+        """
+        Devolve estatísticas dos inimigos deste nível:
+
+          killed: nº de inimigos mortos
+          total_max: nº total de spawns possíveis
+          kill_ratio: killed / total_max (0.0–1.0)
+          active_now: nº de inimigos actualmente vivos
+        """
+        em = self.enemy_manager
+        if em is None:
+            return 0, 0, 0.0, 0
+
+        try:
+            total_max = int(getattr(em, "max_spawns", 0))
+            total_spawned = int(getattr(em, "total_spawned", 0))
+            active_now = int(getattr(em, "active_enemies_count", 0))
+        except Exception:
+            return 0, 0, 0.0, 0
+
+        total_max = max(0, total_max)
+        total_spawned = max(0, total_spawned)
+        active_now = max(0, active_now)
+
+        # Preferir contador real (se existir); fallback para estimativa via EnemyManager.
+        killed = int(getattr(self, "level_enemy_kills", 0) or 0)
+        if killed <= 0:
+            killed = max(0, min(total_spawned, total_max) - active_now)
+
+        kill_ratio = (killed / float(total_max)) if total_max > 0 else 0.0
+
+        return killed, total_max, kill_ratio, active_now
+
+    def has_enough_kills_for_current_level(self) -> bool:
+        """
+        Verifica se já cumprimos o requisito mínimo de kills
+        para desbloquear o próximo nível.
+
+        Neste momento só aplicamos isto no NÍVEL 1.
+        """
+        level_id = getattr(self, "current_level_id", 1)
+
+        # Só nível 1 tem este requisito especial
+        if level_id != 1:
+            return True
+
+        killed, total_max, kill_ratio, active_now = self.get_enemy_kill_stats()
+        required_ratio = float(getattr(config, "LEVEL1_REQUIRED_KILL_RATIO", 0.60))
+
+        if total_max <= 0:
+            # Se não houver inimigos configurados, por segurança dizemos que não passou
+            return False
+
+        return kill_ratio >= required_ratio
+
+
+
+
+
+
+    # ----------------------------- #
+    # KILL COUNTER (novo)
+    # ----------------------------- #
+    def register_enemy_kill(self, enemy) -> None:
+        """Marca um inimigo como contado e incrementa o contador do nível.
+
+        Isto evita contagens duplicadas quando:
+          - o mesmo inimigo é atingido por vários projécteis no mesmo frame
+          - há AOE (granada) + projéctil
+        """
+        if enemy is None:
+            return
+
+        # Evitar double-count
+        if getattr(enemy, "_kill_counted", False):
+            return
+
+        setattr(enemy, "_kill_counted", True)
+
+        try:
+            self.level_enemy_kills = int(getattr(self, "level_enemy_kills", 0)) + 1
+        except Exception:
+            self.level_enemy_kills = 1
+
+    def get_kill_stats(self):
+        """Alias compatível com o 'novo': devolve (killed, total_max, ratio, active_now)."""
+        return self.get_enemy_kill_stats()
     # ----------------------------- #
     # FX
     # ----------------------------- #
     def flash(self, color, frames=None):
         """
-        Flash de ecrã via EffectsManager (mantendo API antiga baseada em frames).
+        Flash de ecrã via EffectsManager (usado pelos cheats e NUKE).
+        Mantém compatibilidade com a API antiga baseada em 'frames'.
         """
-        if not self.effects:
+        if not getattr(self, "effects", None):
             return
 
         if frames is None:
-            frames = config.SCREEN_FLASH_DEFAULT_FRAMES
+            # nº de frames padrão (por ex. 10); cai para 10 se não existir na config
+            frames = getattr(config, "SCREEN_FLASH_DEFAULT_FRAMES", 10)
 
         try:
             duration = max(0.0, float(frames)) / float(config.FPS)
         except Exception:
-            duration = config.SCREEN_FLASH_DEFAULT_FRAMES / 60.0
+            # fallback seguro
+            duration = frames / 60.0
 
         # Fade linear durante a duração toda
-        self.effects.trigger_flash(color=color, duration=duration, fade_time=duration)
+        self.effects.trigger_flash(
+            color=color,
+            duration=duration,
+            fade_time=duration,
+        )
+    
+    
+    def trigger_camera_shake(self, duration: float, intensity: float = 6.0) -> None:
+        """
+        Wrapper para o tremor de câmara no EffectsManager.
+        """
+        if not getattr(self, "effects", None):
+            return
+
+        try:
+            self.effects.trigger_camera_shake(duration, intensity)
+        except Exception:
+            pass
+
+
+    # ----------------------------- #
+    # BOSS
+    # ----------------------------- #
+    def _load_boss_sprite(self):
+        """(novo) Carrega sprite do boss com fallback para vários nomes."""
+        candidates = [
+            getattr(config, "BOSS_SPRITE_NAME", "boss.png"),
+            "boss.png",
+            "Boss.png",
+            "BossHeli.png",
+            "boss_heli.png",
+            "boss_helicopter.png",
+        ]
+
+        w = getattr(config, "BOSS_WIDTH", 160)
+        h = getattr(config, "BOSS_HEIGHT", 120)
+
+        for name in candidates:
+            try:
+                return load_enemy(w, h, name)
+            except Exception:
+                continue
+
+        # Último fallback: tentar sempre boss.png
+        try:
+            return load_enemy(w, h, "boss.png")
+        except Exception:
+            return None
+
+    def _handle_boss_defeated(self) -> None:
+        """(novo) Só corre 1x quando o boss morre."""
+        if getattr(self, "_boss_defeated_handled", False):
+            return
+        self._boss_defeated_handled = True
+
+        # Opcional: som / pontos extra
+        try:
+            self.sound.play_sfx("boss_dead.mp3")
+        except Exception:
+            pass
+
+        # Tenta LevelCompleteScene se existir; senão avança para o próximo nível
+        try:
+            from scenes.flow import LevelCompleteScene  # type: ignore
+        except Exception:
+            LevelCompleteScene = None
+
+        if LevelCompleteScene is not None:
+            self.change_scene(LevelCompleteScene(self))
+        else:
+            # fallback: avança directamente
+            self.go_to_next_level()
+
+    def maybe_spawn_boss(self) -> None:
+        """Cria o boss quando o player chega a ~85% do nível."""
+        if not self.has_boss:
+            return
+        if self.boss is not None:
+            return
+        if not self.player or self.bg_width <= 0:
+            return
+
+        progress = self.player.rect.centerx / float(self.bg_width)
+        if progress < 0.85:
+            return
+
+        # Sprite do boss (novo: tenta vários nomes)
+        img = self._load_boss_sprite()
+        if img is None:
+            return
+
+        # Spawn um bocado à frente do player mas dentro do nível
+        spawn_x = self.player.rect.centerx + config.WIDTH // 3
+        spawn_x = max(0, min(self.bg_width - img.get_width(), spawn_x))
+
+        start_y = -img.get_height()
+        target_y = int(config.HEIGHT * getattr(config, "BOSS_TARGET_Y_RATIO", 0.15))
+
+        self.boss = Boss(img, spawn_x, start_y, target_y)
+
+    def update_boss(self, dt_seconds: float) -> None:
+        """Actualiza boss + garante que entra nas listas de colisão/desenho."""
+        if not self.has_boss:
+            return
+
+        # Spawna se ainda não existir
+        self.maybe_spawn_boss()
+
+        boss = self.boss
+        if not boss:
+            return
+
+        if not getattr(boss, "alive", False):
+            self._handle_boss_defeated()
+
+            self.has_boss = False
+            self.boss = None
+            return
+        
+        # Movimento / AI / tiros
+        boss.update(dt_seconds, self)
+
+        # Garante que é considerado para colisões / melee / granadas
+        if boss not in self.enemies:
+            self.enemies.append(boss)
+
 
     # ----------------------------- #
     # CHEATS
     # ----------------------------- #
     def process_cheats(self, event) -> bool:
+        """Processa letras para códigos de cheat. Devolve True se consumiu a tecla."""
         if event.type != pg.KEYDOWN:
             return False
 
@@ -314,8 +742,15 @@ class Game:
         if not key_name or len(key_name) != 1:
             return False
 
+        # Normalizar para 1 letra (A-Z)
+        key_name = key_name.upper()
+        if not key_name.isalpha():
+            return False
+
         consumed, activations = self.cheat_engine.process_char(key_name)
+
         for code, active in activations:
+            # GOD MODE
             if code == "GOD":
                 self.god_mode = active
                 self.flash(
@@ -323,6 +758,8 @@ class Game:
                     if active
                     else config.CHEAT_FLASH_COLOR_GOD_OFF
                 )
+
+            # TEMPO INFINITO
             elif code == "TIME":
                 self.infinite_time = active
                 self.flash(
@@ -330,6 +767,8 @@ class Game:
                     if active
                     else config.CHEAT_FLASH_COLOR_TIME_OFF
                 )
+
+            # SUPER JUMP
             elif code == "SPJ":
                 self.super_jump = active
                 self.flash(
@@ -343,6 +782,8 @@ class Game:
                         if active
                         else config.CHEAT_NORMAL_JUMP_VALUE
                     )
+
+            # GRANADAS INFINITAS
             elif code == "GRN":
                 self.infinite_granades = active
                 self.flash(
@@ -351,7 +792,7 @@ class Game:
                     else config.CHEAT_FLASH_COLOR_GRN_OFF
                 )
 
-                # Actualizar CombatManager e garantir pelo menos 1 granada lógica
+                # Actualizar CombatManager e garantir pelo menos 1 granada
                 if self.combat_manager:
                     self.combat_manager.enable_infinite_grenades(active)
                     try:
@@ -362,6 +803,40 @@ class Game:
 
                 if active and self.player and getattr(self.player, "granades", 0) <= 0:
                     self.player.granades = 1
+
+            # TROCA – muda o nível inicial (só no Menu)
+            elif code == "TTT":
+                # No menu: roda o nível inicial. In-game: usa como "skip" para o próximo nível.
+                if not isinstance(self.current_scene, MenuScene):
+                    try:
+                        self.go_to_next_level()
+                    except Exception:
+                        pass
+                    continue
+
+                # Nº máximo de níveis de debug (ajusta aqui se adicionares mais)
+                max_levels = getattr(config, "DEBUG_MAX_LEVELS", 2)
+
+                if self.debug_level_index < max_levels - 1:
+                    # Avança para o próximo nível de debug
+                    self.debug_level_index += 1
+                    try:
+                        color = getattr(
+                            config,
+                            "CHEAT_FLASH_COLOR_TROCA",
+                            (100, 255, 100),
+                        )
+                        self.flash(color)
+                    except Exception:
+                        pass
+
+                    print(
+                        f"[CHEAT] Próximo jogo começa no nível "
+                        f"{self.debug_level_index + 1}/{max_levels}"
+                    )
+                else:
+                    # Já não há mais níveis → cena “CHEATER, no more levels”
+                    self.change_scene(NoMoreLevelsScene(self))
 
         return consumed
 
@@ -382,8 +857,19 @@ class Game:
 
         self.player = None
 
+        self.boss = None
+        self.has_boss = False
+
+        # Contadores/flags por nível (novo)
+        self.level_enemy_kills = 0
+        self._boss_defeated_handled = False
+
+        # Pool opcional de projécteis (novo)
+        self.projectile_pool = None
+
         if self.enemy_manager:
             self.enemy_manager.clear()
+        
         self.enemy_manager = None
         self.enemies.clear()
 
@@ -418,39 +904,107 @@ class Game:
     # GAME OVER / START
     # ----------------------------- #
     def handle_game_over(self):
-        """Mostra GAME OVER, trata de highscores e volta ao menu."""
-        # Sincroniza pontuação actual com o ScoreManager (por segurança)
-        if self.game_state:
+        """
+        Transição para a cena de Game Over.
+
+        - Sincroniza a pontuação actual com o ScoreManager
+        - Delega toda a lógica de pedir nome / mostrar tabela de highscores
+          na GameOverScene.
+        """
+        # Sincronizar a pontuação actual (caso ainda não esteja)
+        if self.game_state is not None:
             self.score_manager.current_score = self.game_state.score
 
-        final_score = self.score_manager.current_score
+        # Parar a música actual
+        try:
+            self.sound.stop_music()
+        except Exception:
+            pass
 
-        # Pára a música e mostra texto de GAME OVER
-        self.sound.stop_music()
-        text = pg.render_text(self.font, "GAME OVER", (255, 50, 50))
-        self.screen.blit(
-            text,
-            (config.WIDTH // 2 - text.get_width() // 2, config.HEIGHT // 2),
+        # Tocar som de game over (se existir)
+        try:
+            self.sound.play_game_over_sfx()
+        except Exception:
+            pass
+
+        # Ir para a cena de Game Over (não bloqueante)
+        self.change_scene(GameOverScene(self))
+        
+
+    def go_to_next_level(self) -> None:
+        """
+        Transição automática para o nível seguinte (usado no fim do Lvl1).
+
+        Mantém pontuação e estado básico do jogador (HP / granadas).
+        Não mostra ecrãs – isso é tratado pelas Scenes (LevelCompleteScene/LoadingScene).
+        """
+        # Índice actual / próximo (debug_level_index 0→1, etc.)
+        max_index = max(0, len(LEVEL_LOADERS) - 1)
+        current_idx = max(0, min(self.debug_level_index, max_index))
+        next_idx = current_idx + 1
+
+        if next_idx > max_index:
+            # Sem mais níveis definidos → cena "no more levels"
+            self.change_scene(NoMoreLevelsScene(self))
+            return
+
+        # Guardar estado a manter
+        prev_score = 0
+        if self.game_state:
+            prev_score = self.game_state.score
+        prev_sm_score = (
+            self.score_manager.current_score if self.score_manager else prev_score
         )
-        pg.display_flip()
-        pg.time_wait(config.GAME_OVER_WAIT_MS)
 
-        # Se o score entrar no top, pedir nome
-        if final_score > 0 and self.score_manager.qualifies_for_highscore():
-            enter_scene = EnterNameScene(self.screen, self.clock, self.score_manager)
-            name = enter_scene.run()
-            if name:
-                self.score_manager.register_current_score(name)
+        prev_player_hp = None
+        prev_player_grenades = 0
+        if self.player:
+            prev_player_hp = getattr(self.player, "hp", None)
+            prev_player_grenades = getattr(self.player, "granades", 0)
 
-        # Mostrar tabela de highscores
-        high_scene = HighScoreScene(self.screen, self.clock, self.score_manager)
-        high_scene.run()
+        prev_cm_grenades = None
+        if self.combat_manager:
+            try:
+                prev_cm_grenades = self.combat_manager.grenades
+            except Exception:
+                prev_cm_grenades = None
 
-        # Reset do estado e voltar ao menu
-        self.reset_all_state()
-        self.change_scene(MenuScene(self))
+        # Avançar para o próximo nível
+        self.debug_level_index = next_idx
 
-    def start_game(self):
+        # Arranca nível seguinte (faz reset completo internamente)
+        self.start_game()
+
+        # Restaurar pontuação
+        if self.game_state:
+            self.game_state.score = prev_score
+        if self.score_manager:
+            self.score_manager.current_score = prev_sm_score
+
+        # Restaurar estado básico do jogador
+        if self.player:
+            if prev_player_hp is not None:
+                # Não deixar passar do novo max_hp
+                try:
+                    self.player.hp = max(
+                        0,
+                        min(int(prev_player_hp), int(self.player.max_hp)),
+                    )
+                except Exception:
+                    self.player.hp = prev_player_hp
+
+            try:
+                self.player.granades = max(0, int(prev_player_grenades))
+            except Exception:
+                pass
+
+        if self.combat_manager and prev_cm_grenades not in (None, float("inf")):
+            try:
+                self.combat_manager.set_grenades(int(prev_cm_grenades))
+            except Exception:
+                pass
+
+    def start_game(self, level_id: int | None = None, preserve_progress: bool = False):
         """
         Arranca um novo jogo:
           - faz reset de estado
@@ -458,13 +1012,58 @@ class Game:
           - cria player e inimigos
           - muda para a cena de jogo (LevelScene)
         """
+        # (novo) Opcional: pedir para arrancar directamente num level_id (compatível com o sistema antigo)
+        if level_id is not None:
+            try:
+                level_id = int(level_id)
+            except Exception:
+                level_id = None
+
+            # Mapeamento simples: Lvl1→index0, Lvl2→index1 (ajusta se adicionares mais níveis)
+            if level_id == 2:
+                self.debug_level_index = 1
+            elif level_id == 1:
+                self.debug_level_index = 0
+
+        # (novo) Guardar progresso se quisermos preservar entre níveis (score, upgrades, granadas)
+        prev_score = getattr(self.game_state, "score", 0) if getattr(self, "game_state", None) else 0
+        prev_sm_score = getattr(self.score_manager, "current_score", 0) if getattr(self, "score_manager", None) else 0
+        prev_weapon_stacks = int(getattr(self, "weapon_upgrade_stacks", 0) or 0)
+        prev_fire_mult = float(getattr(self, "weapon_fire_rate_multiplier", 1.0) or 1.0)
+        prev_dmg_mult = float(getattr(self, "weapon_damage_multiplier", 1.0) or 1.0)
+        prev_player_hp = getattr(getattr(self, "player", None), "hp", None)
+        prev_player_grenades = getattr(getattr(self, "player", None), "granades", None)
+        prev_cm_grenades = getattr(getattr(self, "combat_manager", None), "grenades", None)
+
         self.reset_all_state()
 
-        # Nível (TMX)
-        self.level = load_level()
+        # Restaurar progresso (se pedido)
+        if preserve_progress:
+            try:
+                self.weapon_upgrade_stacks = prev_weapon_stacks
+                self.weapon_fire_rate_multiplier = prev_fire_mult
+                self.weapon_damage_multiplier = prev_dmg_mult
+            except Exception:
+                pass
+
+            if self.game_state is not None:
+                self.game_state.score = prev_score
+            if self.score_manager is not None:
+                self.score_manager.current_score = prev_sm_score
+
+        # Nível (TMX) – escolhe pelo índice de debug
+        max_index = max(0, len(LEVEL_LOADERS) - 1)
+        level_index = max(0, min(self.debug_level_index, max_index))
+        load_fn = LEVEL_LOADERS[level_index]
+
+        self.level = load_fn()
         self.background = self.level["background"]
         self.bg_width = self.level["bg_width"]
         self.platforms = self.level["platforms"]
+        self.current_level_id = int(self.level.get("level_id", 1))
+        self.has_boss = bool(self.level.get("has_boss", False))
+        self.boss = None
+        self.enemy_density = self.level.get("enemy_density", "normal")
 
         # Gestor de pickups (power-ups)
         ground_y = config.HEIGHT
@@ -480,21 +1079,41 @@ class Game:
         self.projectiles = self.projectile_manager.get_player_projectiles()
         self.enemy_projectiles = self.projectile_manager.get_enemy_projectiles()
 
-        # Object Pool: projécteis do jogador (reutiliza instâncias)
+        # (novo) Pool opcional de projécteis do jogador
+        self.projectile_pool = None
         try:
-            from entity.projectile import Projectile
+            pool_size = int(getattr(config, "PROJECTILE_POOL_SIZE", 250))
+            # Criamos instâncias "vazias" com valores dummy e depois fazemos reset no disparo.
             self.projectile_pool = ObjectPool(
                 Projectile,
-                size=int(getattr(config, "PROJECTILE_POOL_SIZE", 250)),
-                factory=lambda: Projectile(0, 0, 1, 0),
+                size=pool_size,
+                factory=lambda: Projectile(
+                    0,
+                    0,
+                    1,
+                    0,
+                    max_range=1,
+                    color=getattr(config, "PLAYER_PROJECTILE_COLOR", (255, 255, 0)),
+                ),
+                max_size=pool_size,
             )
         except Exception:
             self.projectile_pool = None
 
+        # Música do nível:
+        #   - Lvl1  → theme.mp3
+        #   - Lvl2  → theme2.mp3
         self.sound.stop_music()
-        self.sound.play_music("theme.mp3")
+        try:
+            if level_index == 1 or self.current_level_id == 2:
+                music_file = "theme2.mp3"
+            else:
+                music_file = "theme.mp3"
+            self.sound.play_music(music_file)
+        except Exception:
+            # fallback: tenta sempre a original
+            self.sound.play_music("theme.mp3")
         self.sound.play_level_start()
-
         # Jogador
         max_hp = self._get_player_max_hp_for_difficulty()
         jump_speed = (
@@ -526,51 +1145,95 @@ class Game:
         # se o cheat de granadas infinitas já estiver activo
         self.combat_manager.enable_infinite_grenades(self.infinite_granades)
 
+        # (novo) Restaurar estado básico do jogador (HP/granadas) se preserve_progress
+        if preserve_progress and self.player:
+            if prev_player_hp is not None:
+                try:
+                    self.player.hp = max(0, min(int(prev_player_hp), int(getattr(self.player, "max_hp", prev_player_hp))))
+                except Exception:
+                    self.player.hp = prev_player_hp
+
+            if prev_player_grenades is not None:
+                try:
+                    self.player.granades = max(0, int(prev_player_grenades))
+                except Exception:
+                    pass
+
+            if self.combat_manager and prev_cm_grenades not in (None, float("inf")):
+                try:
+                    self.combat_manager.set_grenades(int(prev_cm_grenades))
+                except Exception:
+                    pass
+
         # Inimigos – EnemyManager genérico + fábrica de inimigos concretos
         max_spawns, max_active, damage_mult = self._get_enemy_params_for_difficulty()
 
-        # Prototype Pattern: registo de tipos de inimigo (dados do tipo)
-        proto_factory = get_global_prototype_factory()
-        proto_factory.register_enemy(
-            "soldier",
-            EnemyPrototype("soldier", "Rebel1.png", hp=config.ENEMY_MAX_HP, damage=10, points=100),
-        )
-        proto_factory.register_enemy(
-            "fast",
-            EnemyPrototype("fast", "Rebel4.png", hp=config.ENEMY_MAX_HP, damage=10, points=100),
-        )
-        proto_factory.register_enemy(
-            "shooter",
-            EnemyPrototype("shooter", "Rebel2.png", hp=config.ENEMY_MAX_HP, damage=20, points=150),
-        )
-        proto_factory.register_enemy(
-            "heavy",
-            EnemyPrototype("heavy", "Rebel3.png", hp=config.ENEMY_MAX_HP, damage=30, points=200),
-        )
+        # (novo) PrototypeFactory: regista stats/sprites por tipo (se existir no projecto)
+        proto_factory = None
+        try:
+            proto_factory = get_global_prototype_factory()
+
+            # Registos default (ajusta sprites se quiseres)
+            proto_factory.register_enemy(
+                "soldier",
+                EnemyPrototype("soldier", "Rebel1.png", hp=getattr(config, "ENEMY_SOLDIER_HP", 1), damage=1, points=100),
+            )
+            proto_factory.register_enemy(
+                "shooter",
+                EnemyPrototype("shooter", "Rebel2.png", hp=getattr(config, "ENEMY_SHOOTER_HP", 1), damage=1, points=120),
+            )
+            proto_factory.register_enemy(
+                "heavy",
+                EnemyPrototype("heavy", "Rebel3.png", hp=getattr(config, "ENEMY_HEAVY_HP", 2), damage=2, points=200),
+            )
+            proto_factory.register_enemy(
+                "fast",
+                EnemyPrototype("fast", "Rebel4.png", hp=getattr(config, "ENEMY_FAST_HP", 1), damage=1, points=130),
+            )
+        except Exception:
+            proto_factory = None
 
         # Factory que recria a lógica antiga:
         #  - tipos diferentes (soldier/shooter/heavy/fast)
         #  - sprite adequado
         #  - patrol min/max
         #  - plataformas
+        
         def enemy_factory(spawn_x: float, _spawn_y: float) -> Enemy:
-            # Escolha por probabilidades, mas a “descrição do tipo” vem do Prototype
             p = random.random()
-            if p < 0.15:
-                enemy_key = "heavy"
-            elif p < 0.45:
-                enemy_key = "shooter"
+
+            # Distribuição:
+            #  - nível 1: 15% heavy, 30% shooter, 55% pequenos
+            #  - nível 2: 5% heavy, 10% shooter, 85% pequenos (mais caos de mooks)
+            
+            if getattr(self, "current_level_id", 1) == 2:
+                heavy_thr = 0.05
+                shooter_thr = 0.15
             else:
-                enemy_key = random.choice(["soldier", "fast"])
+                heavy_thr = 0.15
+                shooter_thr = 0.45
 
-            cls_map = {
-                "soldier": EnemySoldier,
-                "fast": EnemyFast,
-                "shooter": EnemyShooter,
-                "heavy": EnemyHeavy,
-            }
-            cls = cls_map[enemy_key]
+            if p < heavy_thr:
+                enemy_key = "heavy"
+                cls, sprite = EnemyHeavy, "Rebel3.png"
+            elif p < shooter_thr:
+                enemy_key = "shooter"
+                cls, sprite = EnemyShooter, "Rebel2.png"
+            else:
+                enemy_key, cls, sprite = random.choice(
+                    [
+                        ("soldier", EnemySoldier, "Rebel1.png"),
+                        ("fast", EnemyFast, "Rebel4.png"),
+                    ]
+                )
 
+            # (novo) Se houver PrototypeFactory, pode sobrepor o sprite (e outros stats no futuro)
+            if proto_factory:
+                try:
+                    proto = proto_factory.create_enemy(enemy_key, int(spawn_x), 0) or {}
+                    sprite = proto.get("sprite_path", sprite)
+                except Exception:
+                    pass
             # Clamp do X dentro de margens seguras
             margin_x = config.ENEMY_MANAGER_SPAWN_X_MARGIN
             x = int(spawn_x)
@@ -581,9 +1244,6 @@ class Game:
                 config.ENEMY_MANAGER_SPAWN_Y_MIN,
                 config.HEIGHT // 2,
             )
-
-            proto = proto_factory.create_enemy(enemy_key, x, y) or {}
-            sprite = proto.get("sprite_path", "Rebel1.png")
 
             img = load_enemy(80, 80, sprite)
             enemy = cls(img, x, y, damage_multiplier=damage_mult)
@@ -634,29 +1294,6 @@ class Game:
 
         # Muda para a cena de jogo
         self.change_scene(LevelScene(self))
-
-    def cull_offscreen_projectiles(self) -> None:
-        """Limpa projécteis mortos e devolve-os ao pool (se existir)."""
-        if not self.projectile_manager:
-            return
-
-        pool = self.projectile_pool
-
-        # Player projectiles
-        kept = []
-        for proj in self.projectile_manager.get_player_projectiles():
-            alive = bool(getattr(proj, "alive", True))
-            hit_flash = int(getattr(proj, "hit_flash", 0) or 0)
-            if alive or hit_flash > 0:
-                kept.append(proj)
-            else:
-                if pool is not None:
-                    try:
-                        pool.release(proj)
-                    except Exception:
-                        pass
-        self.projectile_manager._player_projectiles = kept  # noqa: SLF001
-        self.projectiles = self.projectile_manager.get_player_projectiles()
 
     # ----------------------------- #
     # COMBATE / HELPERS
@@ -769,13 +1406,21 @@ class Game:
                 except Exception:
                     pass
 
+            boss = getattr(self, "boss", None)
+
             for enemy in self.enemies:
                 if not getattr(enemy, "alive", False):
                     continue
+
+                # Boss é imune à nuke
+                if boss is not None and enemy is boss:
+                    continue
+
                 enemy.take_damage(99999)
                 if not enemy.alive:
                     points = getattr(enemy, "points", 100)
                     self.add_score(points, enemy.rect.centerx, enemy.rect.top)
+
 
         # ---------------- Som opcional ----------------
         sfx_name = effect.get("sfx") or None
@@ -866,10 +1511,39 @@ class Game:
 
         alvo.take_damage(config.MELEE_KILL_DAMAGE)
 
-        if not alvo.alive:
+        if not alvo:
+            return False
+
+        # Som da faca
+        try:
+            self.sound.play_melee()
+        except Exception:
+            pass
+
+        # Dano especial no boss: não queremos que a faca o one-shot.
+        boss = getattr(self, "boss", None)
+        if boss is not None and alvo is boss:
+            # Podes afinar em config.BOSS_MELEE_DAMAGE;
+            # por defeito tira 1% da vida máxima do boss, just for the lols.
+            base_hp = getattr(boss, "max_hp", 1000)
+            melee_damage = getattr(
+                config,
+                "BOSS_MELEE_DAMAGE",
+                int(base_hp * 0.01),  # 1% do HP por facada
+            )
+        else:
+            melee_damage = config.MELEE_KILL_DAMAGE
+
+        alvo.take_damage(melee_damage)
+
+        if not getattr(alvo, "alive", False):
+            self.register_enemy_kill(alvo)
             points = getattr(alvo, "points", 100)
             self.add_score(points, alvo.rect.centerx, alvo.rect.top)
-            self.sound.play_enemy_death()
+            try:
+                self.sound.play_enemy_death()
+            except Exception:
+                pass
 
         return True
 
@@ -885,27 +1559,49 @@ class Game:
             self.enemy_projectiles,
         )
 
+        # ------------------------------------------
         # Projécteis do player em inimigos
+        # ------------------------------------------
+        boss = getattr(self, "boss", None)
+        processed_projectiles = set()
+
         for hit in result.enemy_hits:
             proj = hit.projectile
             enemy = hit.enemy
+
+            # Já tratámos este projéctil num hit anterior
+            if proj in processed_projectiles:
+                continue
 
             if not getattr(enemy, "alive", False):
                 continue
 
             damage = getattr(proj, "damage", 0)
+            base_damage = getattr(proj, "base_damage", None)
+
+            # No boss, ignorar o multiplicador da arma melhorada
+            if boss is not None and enemy is boss and base_damage is not None:
+                damage = base_damage
+
+            was_alive = getattr(enemy, "alive", True)
+            before_hp = getattr(enemy, "hp", None)
+
             try:
                 enemy.take_damage(damage)
             except Exception:
-                pass
+                processed_projectiles.add(proj)
+                continue
 
-            if hasattr(proj, "trigger_hit"):
-                try:
-                    proj.trigger_hit()
-                except Exception:
-                    pass
+            now_alive = getattr(enemy, "alive", True)
+            after_hp = getattr(enemy, "hp", None)
 
-            if not getattr(enemy, "alive", False):
+            just_died = (was_alive and not now_alive)
+            if not just_died and before_hp is not None and after_hp is not None:
+                if before_hp > 0 and after_hp <= 0:
+                    just_died = True
+
+            if just_died:
+                self.register_enemy_kill(enemy)
                 points = getattr(enemy, "points", 100)
                 self.add_score(points, enemy.rect.centerx, enemy.rect.top)
                 try:
@@ -913,7 +1609,20 @@ class Game:
                 except Exception:
                     pass
 
+            # Projéctil morre ao primeiro impacto
+            if hasattr(proj, "alive"):
+                proj.alive = False
+            if hasattr(proj, "trigger_hit"):
+                try:
+                    proj.trigger_hit()
+                except Exception:
+                    pass
+
+            processed_projectiles.add(proj)
+
+        # ------------------------------------------
         # Projécteis de inimigos em player
+        # ------------------------------------------
         if self.player and not self.god_mode:
             for hit in result.player_hits:
                 proj = hit.projectile
@@ -930,7 +1639,9 @@ class Game:
                     except Exception:
                         pass
 
+        # ------------------------------------------
         # Contacto físico player <-> inimigos
+
         if self.player and not self.god_mode:
             for contact in result.contact_hits:
                 enemy = contact.enemy
@@ -938,10 +1649,23 @@ class Game:
                     continue
 
                 try:
+                    # Player leva dano de contacto
                     self.player.take_damage(enemy.contact_damage_to_player())
+
+                    # Inimigo também pode levar dano ao tocar no player
+                    was_alive = getattr(enemy, "alive", False)
                     enemy.take_damage(enemy.contact_self_damage())
                 except Exception:
-                    pass
+                    continue
+
+                # Se o contacto matou o inimigo, dar pontos + som tal como nos projécteis
+                if was_alive and not getattr(enemy, "alive", False):
+                    points = getattr(enemy, "points", 100)
+                    self.add_score(points, enemy.rect.centerx, enemy.rect.top)
+                    try:
+                        self.sound.play_enemy_death()
+                    except Exception:
+                        pass
 
         # Limpar inimigos mortos
         self.enemies = [e for e in self.enemies if getattr(e, "alive", False)]
@@ -954,26 +1678,18 @@ class Game:
                 pass
             self.handle_game_over()
 
-    def handle_combat(self, dt_seconds: float, keys=None) -> None:
+
+    def handle_combat(self, dt_seconds: float, keys=None, **_ignored_kwargs) -> None:
         """
         Processa input de combate (tiro, melee, granada) via CombatManager.
         """
         if not self.player or not self.combat_manager:
             return
 
-        # Estados de teclas (podem vir de Commands para este frame)
-        if keys is None:
-            keys = pg.get_keys()
-
-        if hasattr(self, "_command_fire_pressed"):
-            fire_pressed = bool(getattr(self, "_command_fire_pressed"))
-        else:
-            fire_pressed = is_fire_pressed(keys)
-
-        if hasattr(self, "_command_grenade_pressed"):
-            secondary_pressed = bool(getattr(self, "_command_grenade_pressed"))
-        else:
-            secondary_pressed = is_granade_pressed(keys)
+        # Estados de teclas
+        keys = keys if keys is not None else pg.get_keys()
+        fire_pressed = is_fire_pressed(keys)
+        secondary_pressed = is_granade_pressed(keys)
 
         fire_just_pressed = fire_pressed and not self.shoot_pressed
         secondary_just_pressed = secondary_pressed and not self.granade_pressed
@@ -983,14 +1699,11 @@ class Game:
         self.granade_pressed = secondary_pressed
 
         # Direcção discreta de tiro
-        if hasattr(self, "_command_shoot_dir"):
-            raw_dx, raw_dy = getattr(self, "_command_shoot_dir")
-        else:
-            raw_dx, raw_dy = get_shoot_direction(
-                keys,
-                facing=self.player.facing,
-                allow_diagonals=True,
-            )
+        raw_dx, raw_dy = get_shoot_direction(
+            keys,
+            facing=self.player.facing,
+            allow_diagonals=True,
+        )
 
         combat_input = CombatInput(
             fire_pressed=fire_pressed,
@@ -1064,28 +1777,40 @@ class Game:
                     else:
                         sx, sy = base_sx, base_sy
 
-                    proj = Projectile(
-                        sx,
-                        sy,
-                        aim.x,
-                        aim.y,
-                        max_range=self.bg_width,
-                        color=projectile_color,
-                    )
+                    # (novo) Tentar reutilizar projéctil do pool (se existir)
+                    proj = None
                     if getattr(self, "projectile_pool", None) is not None:
                         try:
-                            pooled = self.projectile_pool.acquire()
-                            pooled.reset(
-                                x=sx,
-                                y=sy,
-                                dir_x=aim.x,
-                                dir_y=aim.y,
-                                max_range=self.bg_width,
-                                color=projectile_color,
-                            )
-                            proj = pooled
+                            proj = self.projectile_pool.acquire()
+                            if hasattr(proj, "reset"):
+                                # reset() deve espelhar os argumentos do construtor
+                                proj.reset(
+                                    sx,
+                                    sy,
+                                    aim.x,
+                                    aim.y,
+                                    max_range=self.bg_width,
+                                    color=projectile_color,
+                                )
+                            else:
+                                proj = None
                         except Exception:
-                            pass
+                            proj = None
+
+                    if proj is None:
+                        proj = Projectile(
+                            sx,
+                            sy,
+                            aim.x,
+                            aim.y,
+                            max_range=self.bg_width,
+                            color=projectile_color,
+                        )
+
+                    spawn_left = self.POV
+                    spawn_right = self.POV + config.WIDTH
+                    setattr(proj, "spawn_view_left", spawn_left)
+                    setattr(proj, "spawn_view_right", spawn_right)
 
                     if upgraded_shot:
                         base_damage = getattr(proj, "damage", 1)
@@ -1131,14 +1856,6 @@ class Game:
                     if remaining != float("inf"):
                         self.player.granades = int(remaining)
 
-        # Limpa overrides publicados por Commands (válidos apenas neste frame)
-        for attr in ("_command_fire_pressed", "_command_grenade_pressed", "_command_shoot_dir"):
-            if hasattr(self, attr):
-                try:
-                    delattr(self, attr)
-                except Exception:
-                    pass
-
     # ----------------------------- #
     # GRANADAS
     # ----------------------------- #
@@ -1152,7 +1869,9 @@ class Game:
         for g in self.granades[:]:
             g.update(dt)
 
-            # 1) Enquanto está a voar, verifica se bateu em algum inimigo
+            owner = getattr(g, "owner", "player")
+
+            # 1) Enquanto está a voar
             if g.is_flying():
                 gx, gy = g.get_center()
                 gx_i, gy_i = int(gx), int(gy)
@@ -1165,12 +1884,27 @@ class Game:
                     radius * 2,
                 )
 
-                for enemy in self.enemies:
-                    if not getattr(enemy, "alive", False):
-                        continue
-                    if enemy.rect.colliderect(grenade_rect):
-                        g.explode()
-                        break
+                if owner == "player":
+                    # -----------------------------
+                    # GRANADA DO JOGADOR
+                    # -----------------------------
+                    # Comportamento antigo: explode se bater em inimigos
+                    for enemy in self.enemies:
+                        if not getattr(enemy, "alive", False):
+                            continue
+                        if enemy.rect.colliderect(grenade_rect):
+                            g.explode()
+                            break
+                else:
+                    # -----------------------------
+                    # GRANADA DO BOSS / INIMIGOS
+                    # -----------------------------
+                    # NÃO usa colisão com TMX aqui.
+                    # Só explode se acertar directamente no player;
+                    # o "bater no chão" fica a cargo da física da própria Granade.
+                    if self.player and not self.god_mode:
+                        if self.player.rect.colliderect(grenade_rect):
+                            g.explode()
 
             # 2) Explosão: aplica dano em área uma única vez
             if g.is_exploding() and not g.damage_applied:
@@ -1186,29 +1920,102 @@ class Game:
             if g.is_dead():
                 self.granades.remove(g)
 
+
     def apply_granade_aoe_damage(self, granade: Granade):
         """
         Aplica dano em área à volta da granada.
-        Só afecta inimigos (por agora).
+
+        - Se for do jogador → afecta inimigos (inclui boss).
+        - Se for do boss/inimigos → afecta o jogador.
         """
         gx, gy = granade.get_center()
         r = granade.explosion_radius
         r2 = r * r
 
-        for enemy in self.enemies:
-            if not getattr(enemy, "alive", False):
+        owner = getattr(granade, "owner", "player")
+
+        if owner == "player":
+            # -----------------------------
+            # AOE DO JOGADOR → INIMIGOS
+            # -----------------------------
+            for enemy in self.enemies:
+                if not getattr(enemy, "alive", False):
+                    continue
+
+                ex, ey = enemy.rect.center
+                dx = ex - gx
+                dy = ey - gy
+
+                if dx * dx + dy * dy <= r2:
+                    enemy.take_damage(granade.damage)
+                    if not enemy.alive:
+                        self.register_enemy_kill(enemy)
+                        points = getattr(enemy, "points", 100)
+                        self.add_score(points, enemy.rect.centerx, enemy.rect.top)
+                        self.sound.play_enemy_death()
+        else:
+            # -----------------------------
+            # AOE DO BOSS → PLAYER
+            # -----------------------------
+            if self.player and not self.god_mode:
+                px, py = self.player.rect.center
+                dx = px - gx
+                dy = py - gy
+
+                if dx * dx + dy * dy <= r2:
+                    self.player.take_damage(granade.damage)
+
+    #
+    #   Limitar os projecteis para fora do ecrâ (é estúpido matar sem ver o que estou a fazer!!!!)
+    #
+
+    def cull_offscreen_projectiles(self) -> None:
+        """
+        Desactiva/remover projécteis do JOGADOR que já saíram da área visível.
+
+        Regra:
+          - Se o rect da bala ficar totalmente:
+              * à esquerda de POV
+              * ou à direita de POV + WIDTH
+            → marcamos como morto e removemos da lista.
+
+        Isto é independente de onde a câmara estava quando disparaste:
+        só interessa onde está AGORA.
+        """
+        if not self.projectiles:
+            return
+
+        # Janela visível em coordenadas do mundo
+        left_limit = self.POV
+        right_limit = self.POV + config.WIDTH
+
+        for proj in list(self.projectiles):
+            if proj is None:
                 continue
 
-            ex, ey = enemy.rect.center
-            dx = ex - gx
-            dy = ey - gy
+            rect = getattr(proj, "rect", None)
+            if rect is None:
+                continue
 
-            if dx * dx + dy * dy <= r2:
-                enemy.take_damage(granade.damage)
-                if not enemy.alive:
-                    points = getattr(enemy, "points", 100)
-                    self.add_score(points, enemy.rect.centerx, enemy.rect.top)
-                    self.sound.play_enemy_death()
+            # (novo) Limpar se morto OU totalmente fora da área visível
+            offscreen = rect.right < left_limit or rect.left > right_limit
+            dead = not getattr(proj, "alive", True)
+
+            if dead or offscreen:
+                if hasattr(proj, "alive"):
+                    proj.alive = False
+                try:
+                    self.projectiles.remove(proj)
+                except ValueError:
+                    pass
+
+                # Se vier de um pool, devolvemos para reutilizar
+                if getattr(self, "projectile_pool", None) is not None:
+                    try:
+                        self.projectile_pool.release(proj)
+                    except Exception:
+                        pass
+
 
     # ----------------------------- #
     # DRAW HELPERS
@@ -1216,8 +2023,22 @@ class Game:
     def draw_scene(self):
         """Desenha cenário, inimigos, jogador, projécteis, granadas e textos flutuantes."""
         self.screen.fill((0, 0, 0))
+
+        # Offset de tremor de câmara (horizontal)
+        shake_x = 0
+        if self.effects and hasattr(self.effects, "get_camera_shake_offset"):
+            try:
+                shake_x = int(self.effects.get_camera_shake_offset())
+            except Exception:
+                shake_x = 0
+
+        # POV efectivo (já com tremor)
+        camera_x = self.POV - shake_x
+
+        # Background
         if self.background:
-            self.screen.blit(self.background, (-self.POV, 0))
+            # lembrar: background é desenhado com -POV
+            self.screen.blit(self.background, (-camera_x, 0))
 
         # Pickups
         if self.pickup_manager:
@@ -1226,7 +2047,7 @@ class Game:
                 if not data:
                     continue
 
-                x = int(data.get("x", 0) - self.POV)
+                x = int(data.get("x", 0) - camera_x)
                 y = int(data.get("y", 0))
                 w = int(data.get("width", 0))
                 h = int(data.get("height", 0))
@@ -1249,28 +2070,43 @@ class Game:
         for enemy in self.enemies:
             if not enemy:
                 continue
+
             if hasattr(enemy, "draw"):
                 try:
-                    enemy.draw(self.screen, self.POV)
+                    enemy.draw(self.screen, camera_x)
                     continue
                 except Exception:
                     pass
+
             img = getattr(enemy, "image", None)
             rect = getattr(enemy, "rect", None)
             if img is not None and rect is not None:
-                self.screen.blit(img, (rect.x - self.POV, rect.y))
+                self.screen.blit(img, (rect.x - camera_x, rect.y))
+        # Boss (sprite única, se existir e estiver vivo)
+        boss = getattr(self, "boss", None)
+        if boss and getattr(boss, "alive", False):
+            img = getattr(boss, "image", None)
+            rect = getattr(boss, "rect", None)
+            if img is not None and rect is not None:
+                if hasattr(boss, "draw"):
+                    try:
+                        boss.draw(self.screen, camera_x)
+                    except Exception:
+                        self.screen.blit(img, (rect.x - camera_x, rect.y))
+                else:
+                    self.screen.blit(img, (rect.x - camera_x, rect.y))
 
         # Jogador
         if self.player:
             self.screen.blit(
                 self.player.image,
-                (self.player.rect.x - self.POV, self.player.rect.y),
+                (self.player.rect.x - camera_x, self.player.rect.y),
             )
 
         # Projécteis
         for proj in self.projectiles + self.enemy_projectiles:
             if proj:
-                proj.draw(self.screen, self.POV)
+                proj.draw(self.screen, camera_x)
 
         # Granadas
         for g in self.granades:
@@ -1278,15 +2114,17 @@ class Game:
             if not data:
                 continue
 
-            x = int(data["x"] - self.POV)
+            x = int(data["x"] - camera_x)
             y = int(data["y"])
             radius = int(data["radius"])
 
             color = (255, 80, 80) if data["exploding"] else (255, 0, 0)
             pg.draw_circle(self.screen, color, (x, y), radius)
 
+        # Floating texts
         for text in self.floating_texts:
-            text.draw(self.screen, self.POV)
+            text.draw(self.screen, camera_x)
+
 
     def draw_hud(self):
         """Desenha HUD: pontuação, tempo, dificuldade, barra de HP."""
@@ -1357,6 +2195,96 @@ class Game:
                 (x, y, bar_width * hp_ratio, bar_height),
             )
 
+        draw_text_with_outline(
+            self.screen,
+            top_text,
+            self.font,
+            20,
+            10,
+            config.HUD_TEXT_COLOR,
+        )
+
+        # --------- Contador de kills (apenas nível 1) ---------
+        level_id = getattr(self, "current_level_id", 1)
+        if level_id == 1 and self.enemy_manager is not None:
+            killed, total_max, kill_ratio, active_now = self.get_enemy_kill_stats()
+
+            if total_max > 0:
+                required_ratio = float(
+                    getattr(config, "LEVEL1_REQUIRED_KILL_RATIO", 0.60)
+                )
+
+                # nº mínimo de inimigos que tens MESMO de matar.
+                # ex.: total=50, ratio=0.6 → 30
+                # ex.: total=7,  ratio=0.6 → ceil(4.2)=5
+                required_kills = max(
+                    1,
+                        int(total_max * required_ratio + 0.9999),
+                )
+
+                # Texto no formato "Kills: 10/30"
+                kills_text = f"Kills: {killed}/{required_kills}"
+
+                # Cor baseada na progressão:
+                #   <50% do alvo  → vermelho
+                #   entre 50–99%  → amarelo
+                #   >= alvo       → verde
+                progress = killed / float(required_kills)
+
+                if killed >= required_kills:
+                    color = getattr(
+                        config,
+                        "HUD_KILL_COLOR_GREEN",
+                        (0, 255, 0),
+                    )
+                elif progress >= 0.5:
+                    color = getattr(
+                        config,
+                        "HUD_KILL_COLOR_YELLOW",
+                        (255, 255, 0),
+                    )
+                else:
+                    color = getattr(
+                        config,
+                        "HUD_KILL_COLOR_RED",
+                        (255, 80, 80),
+                    )
+
+                # Canto superior direito (ajusta X se quiseres mais à esquerda)
+                x = config.WIDTH - 200
+                y = 10
+                draw_text_with_outline(
+                    self.screen,
+                    kills_text,
+                    self.font,
+                    x,
+                    y,
+                    color,
+                )
+        # Barra de vida do BOSS
+        boss = getattr(self, "boss", None)
+        if boss and getattr(boss, "alive", False):
+            boss_ratio = boss.hp / boss.max_hp if boss.max_hp > 0 else 0
+
+            bar_width = getattr(config, "HUD_BOSS_HP_BAR_WIDTH", 300)
+            bar_height = getattr(config, "HUD_BOSS_HP_BAR_HEIGHT", 16)
+            x = (config.WIDTH - bar_width) // 2
+            y = getattr(config, "HUD_BOSS_HP_BAR_Y", 40)
+
+            bg_color = getattr(config, "HUD_BOSS_HP_BG_COLOR", (40, 0, 0))
+            bar_color = getattr(config, "HUD_BOSS_HP_COLOR", (220, 40, 40))
+
+            pg.draw_rect(
+                self.screen,
+                bg_color,
+                (x - 2, y - 2, bar_width + 4, bar_height + 4),
+            )
+            pg.draw_rect(
+                self.screen,
+                bar_color,
+                (x, y, bar_width * boss_ratio, bar_height),
+            )            
+
     # ----------------------------- #
     # LOOP GLOBAL
     # ----------------------------- #
@@ -1366,173 +2294,17 @@ class Game:
             events = pg.get_events()
             dt = self.clock.get_time()
 
-            if not self.current_scene:
+            # Se por algum motivo ainda não houver cena, vai para o Menu
+            if not self.scene_manager.current_scene:
                 self.change_scene(MenuScene(self))
 
-            self.current_scene.handle_input(events)
-            self.current_scene.update(dt)
-            self.current_scene.draw(self.screen)
+            # Encaminhar para a cena activa
+            self.scene_manager.handle_input(events)
+            self.scene_manager.update(dt)
+            self.scene_manager.draw(self.screen)
 
             pg.display_flip()
             self.clock.tick(config.FPS)
-
-
-# ----------------------------- #
-# CENA DE JOGO (LEVEL)
-# ----------------------------- #
-class LevelScene(Scene):
-    """
-    Cena que trata do jogo em si (nível actual).
-    """
-
-    def handle_input(self, events: list):
-        game = self.game
-        menu_key = controls.get_key(controls.MENU)
-        pause_key = controls.get_key(controls.PAUSE)
-
-        for event in events:
-            if event.type == pg.QUIT:
-                game.sound.stop_music()
-                pg.quit()
-                sys.exit()
-
-            cheat_consumed = game.process_cheats(event)
-
-            if event.type == pg.KEYDOWN:
-                if event.key == menu_key:
-                    game.reset_all_state()
-                    game.change_scene(MenuScene(game))
-                    return
-
-                if event.key == pause_key and not cheat_consumed:
-                    game.change_scene(PauseMenu(game, previous_scene=self))
-                    return
-
-            if game.game_state and event.type == game.game_state.timer_event:
-                if not game.infinite_time:
-                    game.game_state.update_time()
-
-    def update(self, dt: float):
-        game = self.game
-
-        # dt "real" (antes de slow-motion)
-        dt_seconds_raw = dt / 1000.0 if dt else 0.0
-
-        # Actualizar FX em tempo real
-        if game.effects:
-            game.effects.update(dt_seconds_raw)
-            time_scale = game.effects.get_time_scale()
-        else:
-            time_scale = 1.0
-
-        # dt afectado por slow-motion (para lógica de jogo)
-        dt_seconds = dt_seconds_raw * time_scale
-        dt_ms_scaled = dt * time_scale if dt else 0.0
-
-        # Condição de timeout / fim de nível
-        timeout = (
-            game.game_state
-            and game.game_state.time_left <= 0
-            and not game.infinite_time
-        )
-
-        if timeout:
-            player_alive = bool(game.player and game.player.alive)
-
-            if player_alive:
-                try:
-                    game.sound.play_level_end()
-                except Exception:
-                    pass
-            else:
-                try:
-                    game.sound.play_game_over_sfx()
-                except Exception:
-                    pass
-
-            game.handle_game_over()
-            return
-
-        # Pausa lógica
-        if game.game_state and game.game_state.paused:
-            return
-
-        # --- UPDATE JOGADOR ---
-        keys = pg.get_keys()
-        if game.player:
-            # Command Pattern: traduz keys -> commands e executa-os
-            if getattr(game, "command_input", None) and getattr(game, "command_invoker", None):
-                for cmd in game.command_input.build_commands(keys, game):
-                    game.command_invoker.execute(cmd)
-            else:
-                # fallback: comportamento antigo
-                game.player.handle_input(keys)
-
-            game.player.update_animation(dt_ms_scaled)
-            game.player.apply_gravity()
-            game.handle_combat(dt_seconds, keys=keys)
-
-        # --- UPDATE INIMIGOS ---
-        if game.enemy_manager:
-            game.enemy_manager.update(dt_seconds)
-            game.enemies = game.enemy_manager.get_enemies()
-            # projécteis de inimigos: a gestão passa a ser feita directamente
-            # (ex: dentro de Enemy usando o ProjectileManager)
-
-        # --- UPDATE PICKUPS ---
-        if game.pickup_manager:
-            player_rect = game.player.rect if game.player else None
-            pickup_events = game.pickup_manager.update(
-                dt_seconds,
-                player_rect=player_rect,
-            )
-            for ev in pickup_events:
-                game.apply_pickup_effect(ev.effect)
-
-        # --- UPDATE PROJÉCTEIS ---
-        if game.projectile_manager:
-            game.projectile_manager.update(dt_seconds)
-
-        # --- UPDATE GRANADAS ---
-        game.update_granades(dt_ms_scaled)
-
-        # --- COLISÕES ---
-        game.handle_collisions()
-
-        if not isinstance(game.current_scene, LevelScene):
-            return
-
-        # --- FLOATING TEXTS ---
-        for text in game.floating_texts:
-            text.update()
-        game.floating_texts = [t for t in game.floating_texts if t.lifetime > 0]
-
-        # --- CÂMARA / POV ---
-        if game.player:
-            game.POV = game.player.rect.centerx - config.WIDTH // 2
-            game.POV = max(0, min(game.POV, game.bg_width - config.WIDTH))
-
-    def draw(self, screen: pg.Surface):
-        game = self.game
-
-        # Cena normal
-        game.draw_scene()
-        game.draw_hud()
-
-        # Overlay de flash / FX
-        if game.effects:
-            tint = game.effects.get_screen_tint()
-            if tint is not None:
-                color, intensity = tint
-                if intensity > 0.0:
-                    overlay = pg.create_surface(
-                        (config.WIDTH, config.HEIGHT),
-                        alpha=True,
-                    )
-                    alpha = int(max(0.0, min(1.0, intensity)) * 255)
-                    overlay.fill((color[0], color[1], color[2], alpha))
-                    screen.blit(overlay, (0, 0))
-
 
 if __name__ == "__main__":
     Game().run()

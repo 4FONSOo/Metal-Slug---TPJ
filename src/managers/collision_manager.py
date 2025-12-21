@@ -1,19 +1,4 @@
 # collision_manager.py
-"""
-Gestor de colisões (lógica).
-
-Objectivo:
-  - Centralizar a detecção de colisões entre:
-      * player
-      * inimigos
-      * projécteis do player
-      * projécteis dos inimigos
-  - NÃO depende de pygame/pg_engine.
-  - Não aplica danos directamente. Só devolve “eventos de colisão”.
-    O Game/Scene é que decide o que fazer (HP--, score++, etc.).
-"""
-
-from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Protocol, List, Tuple, Any, Optional
@@ -79,11 +64,6 @@ class EnemyTouchesPlayer:
 
 @dataclass
 class CollisionResult:
-    """
-    Resultado de uma passagem de detecção de colisões.
-
-    O Game/Scene pode iterar por estas listas e aplicar o que entender.
-    """
 
     player_hits: List[ProjectileHitPlayer]
     enemy_hits: List[ProjectileHitEnemy]
@@ -91,13 +71,11 @@ class CollisionResult:
 
 
 # ------------------------------------------------------------------ #
-# Helpers de rect
+# Helpers
 # ------------------------------------------------------------------ #
 
 def _rect_to_tuple(rect: Any) -> Tuple[int, int, int, int]:
-    """
-    Converte pg.Rect-like ou (x, y, w, h) em (x, y, w, h).
-    """
+
     if rect is None:
         return 0, 0, 0, 0
 
