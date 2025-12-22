@@ -1,6 +1,6 @@
 # patterns/flyweight.py
 """
-Flyweight Pattern - Cache compartilhado de objetos imutáveis.
+Flyweight Pattern - Cache compartilhada de objetos.
 
 Usado para:
 - Cache de sprites (mesma imagem em múltiplos inimigos)
@@ -54,7 +54,8 @@ class FlyweightFactory:
         # Carrega imagem (função interna)
         try:
             import pg_engine as pg
-            img = pg.load_image(filepath)
+            loader = getattr(pg, "_raw_load_image", None) or pg.load_image
+            img = loader(filepath)
             self._cache[filepath] = img
             self._stats["misses"] += 1
             return img
@@ -95,7 +96,8 @@ class FlyweightFactory:
         
         try:
             import pg_engine as pg
-            font = pg.create_font(font_name, size)
+            creator = getattr(pg, "_raw_create_font", None) or pg.create_font
+            font = creator(font_name, int(size))
             self._cache[key] = font
             self._stats["misses"] += 1
             return font

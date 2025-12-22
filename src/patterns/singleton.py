@@ -1,6 +1,6 @@
 # patterns/singleton.py
 """
-Singleton Pattern - Garante instância única de uma classe.
+Singleton Pattern - Garante instância única de uma classe, uma só vez.
 
 Usado para:
 - SoundManager (uma única instância de mixer)

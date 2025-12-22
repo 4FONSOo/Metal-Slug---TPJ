@@ -1,6 +1,6 @@
 # patterns/command.py
 """
-Command Pattern - Encapsula ações como objetos.
+Command Pattern - Encapsula ações como objetos, evita "if key" repetitivo.
 
 Usado para:
 - Input do jogador (Move, Jump, Shoot, ThrowGrenade)

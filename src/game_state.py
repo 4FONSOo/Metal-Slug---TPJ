@@ -53,6 +53,20 @@ from entity.enemy import (
 from entity.projectile import Projectile
 from entity.granade import Granade  # lógica da granada
 
+try:
+    from patterns.command import CommandInvoker  # type: ignore
+    from managers.command_input_manager import CommandInputManager  # type: ignore
+except Exception:
+    CommandInvoker = None  # type: ignore
+    CommandInputManager = None  # type: ignore
+
+try:
+    from patterns.observer import EventManager, ScoreObserver, SoundObserver  # type: ignore
+except Exception:
+    EventManager = None  # type: ignore
+    ScoreObserver = None  # type: ignore
+    SoundObserver = None  # type: ignore
+
 # ----------------------------- #
 # OPTIONAL SYSTEMS (merged from the "new" version)
 #   - ObjectPool para reutilizar projécteis (performance)
@@ -237,6 +251,34 @@ class Game:
         self.font = pg.create_font(config.HUD_FONT_NAME, config.HUD_FONT_SIZE)
         self.sound = SoundManager()
 
+        # --------------------------------------------------------------
+        # Patterns (opcional, sem quebrar compatibilidade)
+        # --------------------------------------------------------------
+
+        # Command Pattern: input → commands (LevelScene já suporta)
+        self.command_invoker = None
+        self.command_input = None
+        if CommandInvoker is not None and CommandInputManager is not None:
+            try:
+                self.command_invoker = CommandInvoker(history_limit=100)
+                self.command_input = CommandInputManager()
+            except Exception:
+                self.command_invoker = None
+                self.command_input = None
+
+        # Estado publicado por Commands para o combate (fallback: teclado)
+        self._command_fire_pressed = False
+        self._command_grenade_pressed = False
+        self._command_shoot_dir = (1, 0)
+
+        # Observer Pattern: bus de eventos
+        self.events = None
+        if EventManager is not None:
+            try:
+                self.events = EventManager()
+            except Exception:
+                self.events = None
+
         try:
             from score import ScoreManager as _ScoreManager
             print("[SCORE] A usar ScoreManager de score.py")
@@ -353,6 +395,22 @@ class Game:
         # Sistema de scores (pontuação actual + highscores)
         # 
         self.score_manager = score.ScoreManager()
+
+        # Subscrever observers (sem alterar a lógica de jogo)
+        if self.events is not None:
+            try:
+                if ScoreObserver is not None:
+                    so = ScoreObserver(self)
+                    self.events.subscribe("enemy_dead", so.on_event)
+                    self.events.subscribe("pickup_collected", so.on_event)
+                if SoundObserver is not None:
+                    snd = SoundObserver(self.sound)
+                    self.events.subscribe("enemy_dead", snd.on_event)
+                    self.events.subscribe("shoot", snd.on_event)
+                    self.events.subscribe("grenade_throw", snd.on_event)
+                    self.events.subscribe("grenade_explode", snd.on_event)
+            except Exception:
+                pass
 
         # Gestor de cenas
         self.scene_manager = SceneManager(self)
@@ -1537,11 +1595,24 @@ class Game:
         if not getattr(alvo, "alive", False):
             self.register_enemy_kill(alvo)
             points = getattr(alvo, "points", 100)
-            self.add_score(points, alvo.rect.centerx, alvo.rect.top)
-            try:
-                self.sound.play_enemy_death()
-            except Exception:
-                pass
+            x = alvo.rect.centerx
+            y = alvo.rect.top
+
+            if getattr(self, "events", None) is not None:
+                try:
+                    self.events.emit("enemy_dead", {"enemy": alvo, "points": points, "x": x, "y": y})
+                except Exception:
+                    self.add_score(points, x, y)
+                    try:
+                        self.sound.play_enemy_death()
+                    except Exception:
+                        pass
+            else:
+                self.add_score(points, x, y)
+                try:
+                    self.sound.play_enemy_death()
+                except Exception:
+                    pass
 
         return True
 
@@ -1601,11 +1672,23 @@ class Game:
             if just_died:
                 self.register_enemy_kill(enemy)
                 points = getattr(enemy, "points", 100)
-                self.add_score(points, enemy.rect.centerx, enemy.rect.top)
-                try:
-                    self.sound.play_enemy_death()
-                except Exception:
-                    pass
+                x = enemy.rect.centerx
+                y = enemy.rect.top
+                if getattr(self, "events", None) is not None:
+                    try:
+                        self.events.emit("enemy_dead", {"enemy": enemy, "points": points, "x": x, "y": y})
+                    except Exception:
+                        self.add_score(points, x, y)
+                        try:
+                            self.sound.play_enemy_death()
+                        except Exception:
+                            pass
+                else:
+                    self.add_score(points, x, y)
+                    try:
+                        self.sound.play_enemy_death()
+                    except Exception:
+                        pass
 
             # Projéctil morre ao primeiro impacto
             if hasattr(proj, "alive"):
@@ -1659,11 +1742,23 @@ class Game:
                 # Se o contacto matou o inimigo, dar pontos + som tal como nos projécteis
                 if was_alive and not getattr(enemy, "alive", False):
                     points = getattr(enemy, "points", 100)
-                    self.add_score(points, enemy.rect.centerx, enemy.rect.top)
-                    try:
-                        self.sound.play_enemy_death()
-                    except Exception:
-                        pass
+                    x = enemy.rect.centerx
+                    y = enemy.rect.top
+                    if getattr(self, "events", None) is not None:
+                        try:
+                            self.events.emit("enemy_dead", {"enemy": enemy, "points": points, "x": x, "y": y})
+                        except Exception:
+                            self.add_score(points, x, y)
+                            try:
+                                self.sound.play_enemy_death()
+                            except Exception:
+                                pass
+                    else:
+                        self.add_score(points, x, y)
+                        try:
+                            self.sound.play_enemy_death()
+                        except Exception:
+                            pass
 
         # Limpar inimigos mortos
         self.enemies = [e for e in self.enemies if getattr(e, "alive", False)]
@@ -1684,10 +1779,27 @@ class Game:
         if not self.player or not self.combat_manager:
             return
 
-        # Estados de teclas
+        # Input (preferir estado publicado via Command Pattern; fallback: teclado)
         keys = keys if keys is not None else pg.get_keys()
-        fire_pressed = is_fire_pressed(keys)
-        secondary_pressed = is_granade_pressed(keys)
+
+        use_command_state = False
+        try:
+            fire_pressed = bool(getattr(self, "_command_fire_pressed"))
+            secondary_pressed = bool(getattr(self, "_command_grenade_pressed"))
+            raw_dx, raw_dy = getattr(self, "_command_shoot_dir")
+            raw_dx, raw_dy = int(raw_dx), int(raw_dy)
+            use_command_state = True
+        except Exception:
+            use_command_state = False
+
+        if not use_command_state:
+            fire_pressed = is_fire_pressed(keys)
+            secondary_pressed = is_granade_pressed(keys)
+            raw_dx, raw_dy = get_shoot_direction(
+                keys,
+                facing=self.player.facing,
+                allow_diagonals=True,
+            )
 
         fire_just_pressed = fire_pressed and not self.shoot_pressed
         secondary_just_pressed = secondary_pressed and not self.granade_pressed
@@ -1695,13 +1807,6 @@ class Game:
         # Guardar estado para próximo frame
         self.shoot_pressed = fire_pressed
         self.granade_pressed = secondary_pressed
-
-        # Direcção discreta de tiro
-        raw_dx, raw_dy = get_shoot_direction(
-            keys,
-            facing=self.player.facing,
-            allow_diagonals=True,
-        )
 
         combat_input = CombatInput(
             fire_pressed=fire_pressed,
@@ -1783,10 +1888,10 @@ class Game:
                             if hasattr(proj, "reset"):
                                 # reset() deve espelhar os argumentos do construtor
                                 proj.reset(
-                                    sx,
-                                    sy,
-                                    aim.x,
-                                    aim.y,
+                                    x=sx,
+                                    y=sy,
+                                    dir_x=aim.x,
+                                    dir_y=aim.y,
                                     max_range=self.bg_width,
                                     color=projectile_color,
                                 )
@@ -1823,14 +1928,26 @@ class Game:
                     else:
                         self.projectiles.append(proj)
 
-                # Som do tiro
-                try:
-                    if upgraded_shot:
-                        self.sound.play_sfx("tiro2.mp3")
-                    else:
-                        self.sound.play_sfx("tiro1.mp3")
-                except Exception:
-                    pass
+                # Som do tiro via Observer (fallback: directo)
+                if getattr(self, "events", None) is not None:
+                    try:
+                        self.events.emit("shoot", {"upgraded": upgraded_shot})
+                    except Exception:
+                        try:
+                            if upgraded_shot:
+                                self.sound.play_sfx("tiro2.mp3")
+                            else:
+                                self.sound.play_sfx("tiro1.mp3")
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        if upgraded_shot:
+                            self.sound.play_sfx("tiro2.mp3")
+                        else:
+                            self.sound.play_sfx("tiro1.mp3")
+                    except Exception:
+                        pass
 
             elif isinstance(ev, ThrowGrenadeEvent):
                 facing = getattr(self.player, "facing", 1)
@@ -1843,6 +1960,12 @@ class Game:
                     owner="player",
                 )
                 self.granades.append(g)
+
+                if getattr(self, "events", None) is not None:
+                    try:
+                        self.events.emit("grenade_throw", {})
+                    except Exception:
+                        pass
 
                 # Sincronizar nº de granadas visível com CombatManager
                 if (
@@ -1906,10 +2029,19 @@ class Game:
 
             # 2) Explosão: aplica dano em área uma única vez
             if g.is_exploding() and not g.damage_applied:
-                try:
-                    self.sound.play_grenade_explosion()
-                except Exception:
-                    pass
+                if getattr(self, "events", None) is not None:
+                    try:
+                        self.events.emit("grenade_explode", {})
+                    except Exception:
+                        try:
+                            self.sound.play_grenade_explosion()
+                        except Exception:
+                            pass
+                else:
+                    try:
+                        self.sound.play_grenade_explosion()
+                    except Exception:
+                        pass
 
                 self.apply_granade_aoe_damage(g)
                 g.damage_applied = True

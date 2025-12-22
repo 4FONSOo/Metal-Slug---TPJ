@@ -142,7 +142,13 @@ class LevelScene(Scene):
                 player_rect=player_rect,
             )
             for ev in pickup_events:
-                game.apply_pickup_effect(ev.effect)
+                if getattr(game, "events", None) is not None:
+                    try:
+                        game.events.emit("pickup_collected", {"effect": ev.effect})
+                    except Exception:
+                        game.apply_pickup_effect(ev.effect)
+                else:
+                    game.apply_pickup_effect(ev.effect)
 
         # ---------------- PROJÉCTEIS ----------------
         if game.projectile_manager:

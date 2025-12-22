@@ -1,6 +1,6 @@
 # patterns/observer.py
 """
-Observer Pattern - Sistema de eventos desacoplado.
+Observer Pattern - Sistema de eventos.
 
 Usado para:
 - EnemyDead: quando um inimigo morre (score, som)

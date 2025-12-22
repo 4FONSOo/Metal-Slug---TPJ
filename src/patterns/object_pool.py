@@ -3,7 +3,7 @@
 Object Pool Pattern - Reutilização de objetos para evitar alocação/desalocação contínua.
 
 Usado para:
-- Projectiles: Reutilizar instâncias em vez de criar/deletar a cada tiro
+- Projectiles: Reutilizar instâncias em vez de criar/apagar a cada tiro
 - Granadas: Pool de granadas para reutilizar
 
 Vantagens:

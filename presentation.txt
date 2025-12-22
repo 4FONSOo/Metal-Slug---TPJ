@@ -1,0 +1,14 @@
+Princiapais dificuldades:
+
+- Erro de principiante, começar a desenhar tudo sem ter wm consideração as patterns
+- Duplicação escusada de código
+- Como criar um mapa
+- Criar os inimigos e insituir a lógica
+- Descobrir que programming patterns seriam ideais para implementar
+- Animações de sprites em pygame
+
+Aprendizagens:
+
+- Reaproveitar codigo (enemy / boss)
+- Condições do player que podem ser usadas em enemys (plataformas/granadas)
+- Como os programming patterns funcionam e para que servem 

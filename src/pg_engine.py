@@ -138,15 +138,45 @@ def scale_image(image: Surface, size) -> Surface:
     return pygame.transform.smoothscale(image, size)
 
 
-def load_image(path: str) -> Surface:
+def _raw_load_image(path: str) -> Surface:
+    """Carregamento directo (sem cache) — usado pelo Flyweight para evitar recursão."""
     return pygame.image.load(path).convert_alpha()
+
+
+def load_image(path: str) -> Surface:
+    """Carrega imagem; usa Flyweight cache quando disponível."""
+    try:
+        from patterns.flyweight import get_global_flyweight_factory
+
+        img = get_global_flyweight_factory().get_sprite(path)
+        if img is not None:
+            return img
+    except Exception:
+        pass
+
+    return _raw_load_image(path)
 
 
 # -----------------------------
 # Fontes / texto
 # -----------------------------
+def _raw_create_font(name: str, size: int):
+    """Criação directa (sem cache) — usado pelo Flyweight para evitar recursão."""
+    return pygame.font.SysFont(name, int(size))
+
+
 def create_font(name: str, size: int):
-    return pygame.font.SysFont(name, size)
+    """Cria fonte; usa Flyweight cache quando disponível."""
+    try:
+        from patterns.flyweight import get_global_flyweight_factory
+
+        font = get_global_flyweight_factory().get_font(name, int(size))
+        if font is not None:
+            return font
+    except Exception:
+        pass
+
+    return _raw_create_font(name, int(size))
 
 
 def render_text(font, text: str, color, antialias: bool = True):
